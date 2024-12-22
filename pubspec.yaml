@@ -1,0 +1,47 @@
+name: bugzapp
+description: A bug tracking application
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  http: ^1.1.0
+  shared_preferences: ^2.2.0
+  google_fonts: ^6.1.0
+  timeago: ^3.6.0
+  photo_view: ^0.14.0
+  url_launcher: ^6.1.14
+  flutter_cache_manager: ^3.3.1
+  file_picker: ^6.2.1
+  intl: ^0.18.1
+  flutter_launcher_icons: ^0.14.2
+  dio: ^5.4.1
+  image_picker: ^1.0.7
+  permission_handler: ^11.2.0
+
+
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/bug_icon.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/bug_icon.png"
+  adaptive_icon_mask: true
+  min_sdk_android: 21
