@@ -130,6 +130,21 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  Future<void> _deleteBugReport(int bugId) async {
+    try {
+      await _bugReportService.deleteBugReport(bugId);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Bug report deleted successfully')),
+      );
+      _loadData(); // Refresh the list
+    } catch (e) {
+      print('Error deleting bug report: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error deleting bug report: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -309,6 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             bug: bug,
                             onStatusToggle: () => _toggleBugStatus(bug.id),
                             onSendReminder: () => _sendReminder(bug.id),
+                            onDelete: () => _deleteBugReport(bug.id),
                           );
                         },
                       ),

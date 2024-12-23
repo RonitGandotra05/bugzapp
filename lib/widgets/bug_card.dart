@@ -12,14 +12,14 @@ class BugCard extends StatelessWidget {
   final BugReport bug;
   final VoidCallback onStatusToggle;
   final VoidCallback onSendReminder;
-  final VoidCallback? onDelete;
+  final Function() onDelete;
 
   const BugCard({
     Key? key,
     required this.bug,
     required this.onStatusToggle,
     required this.onSendReminder,
-    this.onDelete,
+    required this.onDelete,
   }) : super(key: key);
 
   void _showBugDetails(BuildContext context) {
@@ -118,28 +118,6 @@ class BugCard extends StatelessWidget {
                       // Actions
                       Row(
                         children: [
-                          if (onDelete != null)
-                            IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 20),
-                              onPressed: onDelete,
-                              color: Colors.red[300],
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                            ),
-                          IconButton(
-                            icon: Icon(
-                              bug.status == BugStatus.resolved
-                                  ? Icons.refresh
-                                  : Icons.check_circle_outline,
-                              size: 20,
-                            ),
-                            onPressed: onStatusToggle,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(),
-                            color: bug.status == BugStatus.resolved
-                                ? Colors.orange
-                                : Colors.green,
-                          ),
                           if (bug.status == BugStatus.assigned)
                             IconButton(
                               icon: const Icon(Icons.notifications_none, size: 20),
@@ -148,6 +126,73 @@ class BugCard extends StatelessWidget {
                               constraints: const BoxConstraints(),
                               color: Colors.blue,
                             ),
+                          PopupMenuButton<String>(
+                            itemBuilder: (context) => [
+                              // Add resolve/unresolve option
+                              PopupMenuItem(
+                                value: 'toggle_status',
+                                child: ListTile(
+                                  leading: Icon(
+                                    bug.status == BugStatus.resolved
+                                        ? Icons.refresh
+                                        : Icons.check_circle_outline,
+                                    color: bug.status == BugStatus.resolved
+                                        ? Colors.orange
+                                        : Colors.green,
+                                  ),
+                                  title: Text(
+                                    bug.status == BugStatus.resolved
+                                        ? 'Mark as Pending'
+                                        : 'Mark as Resolved',
+                                  ),
+                                ),
+                              ),
+                              // Delete option (for both assigned and resolved bugs)
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: ListTile(
+                                  leading: Icon(Icons.delete, color: Colors.red),
+                                  title: Text('Delete'),
+                                ),
+                              ),
+                            ],
+                            onSelected: (value) {
+                              if (value == 'delete') {
+                                // Show confirmation dialog
+                                showDialog(
+                                  context: context,
+                                  builder: (context) => AlertDialog(
+                                    title: Text('Delete Bug Report'),
+                                    content: Text(
+                                      bug.status == BugStatus.resolved
+                                          ? 'Are you sure you want to delete this resolved bug report?'
+                                          : 'Are you sure you want to delete this bug report?'
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(context),
+                                        child: Text('Cancel'),
+                                      ),
+                                      TextButton(
+                                        onPressed: () {
+                                          Navigator.pop(context);
+                                          onDelete();
+                                        },
+                                        child: Text('Delete', style: TextStyle(color: Colors.red)),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              } else if (value == 'toggle_status') {
+                                onStatusToggle();
+                              }
+                            },
+                            icon: Icon(
+                              Icons.more_vert,
+                              color: Colors.grey[600],
+                              size: 20,
+                            ),
+                          ),
                         ],
                       ),
                     ],

@@ -371,4 +371,41 @@ class BugReportService {
       throw Exception('Failed to connect to server: $e');
     }
   }
+
+  Future<void> deleteBugReport(int bugId) async {
+    try {
+      final token = await TokenStorage.getToken();
+      final dio = Dio();
+      dio.options.headers['Authorization'] = 'Bearer $token';
+      
+      final url = '${ApiConstants.baseUrl}/bug_reports/$bugId';
+      print('Attempting to delete bug report: $url');
+
+      final response = await dio.delete(
+        url,
+        options: Options(
+          validateStatus: (status) => status != null && (status >= 200 && status < 300),
+          headers: {
+            'Accept': '*/*',
+          },
+        ),
+      );
+
+      print('Response status: ${response.statusCode}');
+      print('Response data: ${response.data}');
+
+      if (response.statusCode != 200) {
+        throw Exception('Failed to delete bug report: ${response.data}');
+      }
+    } catch (e) {
+      print('Error deleting bug report: $e');
+      if (e is DioException) {
+        print('Request that failed: ${e.requestOptions.uri}');
+        print('Request headers: ${e.requestOptions.headers}');
+        print('Response status: ${e.response?.statusCode}');
+        print('Response data: ${e.response?.data}');
+      }
+      rethrow;
+    }
+  }
 } 
