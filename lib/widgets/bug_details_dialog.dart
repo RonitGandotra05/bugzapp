@@ -46,14 +46,23 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
   }
 
   Future<void> _loadComments() async {
+    setState(() {
+      _isLoading = true;
+    });
+    
     try {
       final comments = await widget.bugReportService.getBugComments(widget.bug.id);
-      setState(() {
-        _comments = comments;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _comments = comments;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading comments: $e')),
         );
@@ -61,16 +70,16 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
     }
   }
 
-  Future<void> _addComment() async {
-    if (_commentController.text.isEmpty) return;
-
+  Future<void> _addComment(String comment) async {
     try {
-      await widget.bugReportService.addComment(
-        widget.bug.id,
-        _commentController.text,
-      );
-      _commentController.clear();
+      await widget.bugReportService.addComment(widget.bug.id, comment);
+      // Reload comments after adding
       await _loadComments();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Comment added successfully')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -206,7 +215,7 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
                       ),
                       IconButton(
                         icon: const Icon(Icons.send),
-                        onPressed: _addComment,
+                        onPressed: () => _addComment(_commentController.text),
                       ),
                     ],
                   ),

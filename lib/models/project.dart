@@ -11,9 +11,9 @@ class Project {
 
   factory Project.fromJson(Map<String, dynamic> json) {
     return Project(
-      id: json['id'],
-      name: json['name'],
-      description: json['description'],
+      id: json['id'] as int,
+      name: json['name'] as String,
+      description: json['description'] as String?,
     );
   }
 } 

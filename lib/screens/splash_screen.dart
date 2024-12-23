@@ -36,60 +36,85 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: MouseRegion(
-        onHover: (event) => setState(() => _mousePosition = event.localPosition),
-        child: CustomPaint(
-          painter: ShimmerPainter(_mousePosition),
-          child: Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const BugIcon(size: 120),
-                const SizedBox(height: 24),
-                Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Text(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFF9575CD),  // Deeper purple
+              Color(0xFF7E57C2),  // Medium-deep purple
+              Color(0xFF673AB7),  // Dark purple
+            ],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Bug Icon with glow effect
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.white.withOpacity(0.2),
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: const BugIcon(
+                  size: 72,
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // App Name with shimmer effect
+              Stack(
+                alignment: Alignment.center,
+                children: [
+                  Text(
+                    'BugzApp',
+                    style: GoogleFonts.poppins(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      foreground: Paint()
+                        ..style = PaintingStyle.stroke
+                        ..strokeWidth = 12
+                        ..color = Colors.purple.withOpacity(0.2),
+                      shadows: [
+                        BoxShadow(
+                          color: Colors.purple.withOpacity(0.3),
+                          blurRadius: 15,
+                          spreadRadius: 5,
+                        ),
+                      ],
+                    ),
+                  ),
+                  ShaderMask(
+                    shaderCallback: (bounds) => LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white.withOpacity(0.9),
+                        Colors.white,
+                        Colors.white.withOpacity(0.9),
+                      ],
+                    ).createShader(bounds),
+                    child: Text(
                       'BugzApp',
                       style: GoogleFonts.poppins(
                         fontSize: 32,
                         fontWeight: FontWeight.bold,
-                        foreground: Paint()
-                          ..style = PaintingStyle.stroke
-                          ..strokeWidth = 12
-                          ..color = Colors.purple.withOpacity(0.2),
-                        shadows: [
-                          BoxShadow(
-                            color: Colors.purple.withOpacity(0.3),
-                            blurRadius: 15,
-                            spreadRadius: 5,
-                          ),
-                        ],
+                        color: Colors.white,
                       ),
                     ),
-                    ShaderMask(
-                      shaderCallback: (bounds) => LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          Colors.purple.shade300,
-                          Colors.purple.shade500,
-                          Colors.purple.shade300,
-                        ],
-                      ).createShader(bounds),
-                      child: Text(
-                        'BugzApp',
-                        style: GoogleFonts.poppins(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),

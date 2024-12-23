@@ -15,11 +15,11 @@ class Comment {
 
   factory Comment.fromJson(Map<String, dynamic> json) {
     return Comment(
-      id: json['id'],
-      bugReportId: json['bug_report_id'],
-      userName: json['user_name'],
-      comment: json['comment'],
-      createdAt: DateTime.parse(json['created_at']).toLocal(),
+      id: json['id'] as int,
+      bugReportId: json['bug_report_id'] as int,
+      userName: json['user_name'] as String,
+      comment: json['comment'] as String,
+      createdAt: DateTime.parse(json['created_at']),
     );
   }
 } 

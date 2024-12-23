@@ -8,315 +8,240 @@ import '../services/image_proxy_service.dart';
 import '../services/bug_report_service.dart';
 import 'bug_details_dialog.dart';
 
-class BugCard extends StatefulWidget {
+class BugCard extends StatelessWidget {
   final BugReport bug;
   final VoidCallback onStatusToggle;
   final VoidCallback onSendReminder;
+  final VoidCallback? onDelete;
 
   const BugCard({
     Key? key,
     required this.bug,
     required this.onStatusToggle,
     required this.onSendReminder,
+    this.onDelete,
   }) : super(key: key);
 
-  @override
-  State<BugCard> createState() => _BugCardState();
-}
-
-class _BugCardState extends State<BugCard> {
-  // Store the image data
-  Uint8List? imageData;
-  bool isLoading = true;
-  bool hasError = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadImage();
-  }
-
-  Future<void> _loadImage() async {
-    if (widget.bug.mediaType == 'video' || widget.bug.imageUrl == null) return;
-    
-    try {
-      final data = await ImageProxyService.getImageBytes(widget.bug.imageUrl);
-      if (mounted) {
-        setState(() {
-          imageData = data;
-          isLoading = false;
-          hasError = data == null;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          isLoading = false;
-          hasError = true;
-        });
-      }
-    }
-  }
-
-  Widget _buildMediaPreview() {
-    if (widget.bug.mediaType == null || widget.bug.imageUrl == null) {
-      return Container(
-        height: 200,
-        color: Colors.grey[200],
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.image_not_supported, color: Colors.grey[400], size: 48),
-              const SizedBox(height: 8),
-              Text(
-                'No Image Available',
-                style: GoogleFonts.poppins(color: Colors.grey[600]),
-              ),
-            ],
-          ),
-        ),
-      );
-    } else if (widget.bug.mediaType == 'video') {
-      return Container(
-        height: 200,
-        color: Colors.black87,
-        child: const Center(
-          child: Icon(
-            Icons.play_circle_outline,
-            size: 48,
-            color: Colors.white,
-          ),
-        ),
-      );
-    } else {
-      return Image.network(
-        widget.bug.imageUrl ?? '',
-        fit: BoxFit.cover,
-        height: 200,
-        width: double.infinity,
-        errorBuilder: (context, error, stackTrace) {
-          return Container(
-            height: 200,
-            color: Colors.grey[200],
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.broken_image, color: Colors.grey[400], size: 48),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Failed to Load Image',
-                    style: GoogleFonts.poppins(color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    }
+  void _showBugDetails(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => BugDetailsDialog(
+        bug: bug,
+        imageUrl: bug.imageUrl,
+        mediaType: bug.mediaType,
+        tabUrl: bug.tabUrl,
+        bugReportService: BugReportService(),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        showDialog(
-          context: context,
-          builder: (context) => BugDetailsDialog(
-            bug: widget.bug,
-            imageUrl: widget.bug.imageUrl ?? 'N/A',
-            tabUrl: widget.bug.tabUrl ?? 'N/A',
-            mediaType: widget.bug.mediaType ?? 'image',
-            bugReportService: BugReportService(),
+    // Get screen width to maintain consistent card size
+    final screenWidth = MediaQuery.of(context).size.width;
+    final cardWidth = screenWidth > 600 ? 400.0 : screenWidth * 0.9;
+
+    // Define colors based on status
+    final backgroundColor = bug.status == BugStatus.assigned
+        ? const Color(0xFFFFEBEE)  // More noticeable red background
+        : const Color(0xFFE8F5E9); // More noticeable green background
+
+    final borderColor = bug.status == BugStatus.assigned
+        ? const Color(0xFFFFCDD2)  // Stronger red border
+        : const Color(0xFFC8E6C9); // Stronger green border
+
+    return Center(
+      child: Container(
+        width: cardWidth,
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: borderColor,
+            width: 1,
           ),
-        );
-      },
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
-        elevation: 8,
-        child: InkWell(
-          onTap: () {
-            showDialog(
-              context: context,
-              builder: (context) => BugDetailsDialog(
-                bug: widget.bug,
-                imageUrl: widget.bug.imageUrl ?? 'N/A',
-                tabUrl: widget.bug.tabUrl ?? 'N/A',
-                mediaType: widget.bug.mediaType ?? 'image',
-                bugReportService: BugReportService(),
-              ),
-            );
-          },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Hero(
-                tag: 'bug-image-${widget.bug.id}',
-                child: GestureDetector(
-                  onTap: () {
-                    Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => ImagePreview(
-                          imageUrl: widget.bug.imageUrl ?? 'N/A',
-                          tabUrl: widget.bug.tabUrl ?? 'N/A',
-                          mediaType: widget.bug.mediaType ?? 'image',
-                          description: widget.bug.description,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _showBugDetails(context),
+            borderRadius: BorderRadius.circular(20),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header with Status and Actions
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Status Chips
+                      Row(
+                        children: [
+                          _buildStatusChip(
+                            text: bug.severityText,
+                            color: bug.severityColor,
+                          ),
+                          const SizedBox(width: 8),
+                          _buildStatusChip(
+                            text: bug.statusText,
+                            color: bug.status == BugStatus.resolved
+                                ? Colors.green
+                                : Colors.orange,
+                          ),
+                        ],
+                      ),
+                      // Actions
+                      Row(
+                        children: [
+                          if (onDelete != null)
+                            IconButton(
+                              icon: const Icon(Icons.delete_outline, size: 20),
+                              onPressed: onDelete,
+                              color: Colors.red[300],
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                            ),
+                          IconButton(
+                            icon: Icon(
+                              bug.status == BugStatus.resolved
+                                  ? Icons.refresh
+                                  : Icons.check_circle_outline,
+                              size: 20,
+                            ),
+                            onPressed: onStatusToggle,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            color: bug.status == BugStatus.resolved
+                                ? Colors.orange
+                                : Colors.green,
+                          ),
+                          if (bug.status == BugStatus.assigned)
+                            IconButton(
+                              icon: const Icon(Icons.notifications_none, size: 20),
+                              onPressed: onSendReminder,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              color: Colors.blue,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Description
+                  Text(
+                    bug.description,
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      color: Colors.black87,
+                      height: 1.3,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Image if available
+                  if (bug.imageUrl != null)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        bug.imageUrl!,
+                        height: 120,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, __, ___) => Container(),
+                      ),
+                    ),
+
+                  const SizedBox(height: 12),
+
+                  // Footer
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (bug.projectName != null)
+                              Text(
+                                bug.projectName!,
+                                style: GoogleFonts.poppins(
+                                  color: Colors.grey[700],
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            Text(
+                              'Assigned to: ${bug.recipient}',
+                              style: GoogleFonts.poppins(
+                                color: Colors.grey[600],
+                                fontSize: 11,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    );
-                  },
-                  child: _buildMediaPreview(),
-                ),
-              ),
-
-              // Content Section
-              Padding(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Status Row
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: widget.bug.severityColor.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            widget.bug.severityText,
-                            style: GoogleFonts.poppins(
-                              color: widget.bug.severityColor,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: widget.bug.status == BugStatus.resolved
-                                ? Colors.green.withOpacity(0.1)
-                                : Colors.orange.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Text(
-                            widget.bug.statusText,
-                            style: GoogleFonts.poppins(
-                              color: widget.bug.status == BugStatus.resolved
-                                  ? Colors.green
-                                  : Colors.orange,
-                              fontWeight: FontWeight.w500,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Description
-                    Text(
-                      widget.bug.description,
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 8),
-
-                    // Project Info
-                    if (widget.bug.projectName != null) ...[
                       Text(
-                        widget.bug.projectName!,
+                        timeago.format(bug.modifiedDate.toLocal()),
                         style: GoogleFonts.poppins(
-                          color: Colors.grey[600],
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                    ],
-
-                    // Assignment Info
-                    Text(
-                      'Assigned to: ${widget.bug.recipient}',
-                      style: GoogleFonts.poppins(
-                        color: Colors.grey[600],
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-
-                    Text(
-                      timeago.format(widget.bug.modifiedDate.toLocal()),
-                      style: GoogleFonts.poppins(
-                        color: Colors.grey[500],
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // Action Buttons
-              Padding(
-                padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton.icon(
-                      onPressed: widget.onStatusToggle,
-                      icon: Icon(
-                        widget.bug.status == BugStatus.resolved
-                            ? Icons.refresh
-                            : Icons.check,
-                        size: 20,
-                      ),
-                      label: Text(
-                        widget.bug.status == BugStatus.resolved ? 'Reopen' : 'Resolve',
-                        style: GoogleFonts.poppins(),
-                      ),
-                      style: TextButton.styleFrom(
-                        foregroundColor: widget.bug.status == BugStatus.resolved
-                            ? Colors.orange
-                            : Colors.green,
-                      ),
-                    ),
-                    if (widget.bug.status == BugStatus.assigned) ...[
-                      const SizedBox(width: 8),
-                      TextButton.icon(
-                        onPressed: widget.onSendReminder,
-                        icon: const Icon(Icons.notifications_none),
-                        label: Text(
-                          'Remind',
-                          style: GoogleFonts.poppins(),
-                        ),
-                        style: TextButton.styleFrom(
-                          foregroundColor: Colors.blue,
+                          color: Colors.grey[500],
+                          fontSize: 11,
                         ),
                       ),
                     ],
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusChip({required String text, required Color color}) {
+    final chipColor = text.toLowerCase().contains('assigned') 
+        ? const Color(0xFFE53935)  // Brighter red for assigned
+        : const Color(0xFF43A047); // Brighter green for resolved
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: chipColor.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: chipColor.withOpacity(0.4),  // Increased border opacity
+          width: 0.5,
+        ),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            chipColor.withOpacity(0.25),  // Increased gradient opacity
+            chipColor.withOpacity(0.2),
+            chipColor.withOpacity(0.15),
+          ],
+        ),
+      ),
+      child: Text(
+        text,
+        style: GoogleFonts.poppins(
+          color: chipColor,  // Full opacity for text
+          fontWeight: FontWeight.w500,
+          fontSize: 11,
         ),
       ),
     );

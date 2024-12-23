@@ -6,80 +6,113 @@ enum BugStatus {
 }
 
 enum SeverityLevel {
-  low,
+  high,
   medium,
-  high
+  low
+}
+
+extension SeverityLevelExtension on SeverityLevel {
+  String get displayName {
+    switch (this) {
+      case SeverityLevel.high:
+        return 'High';
+      case SeverityLevel.medium:
+        return 'Medium';
+      case SeverityLevel.low:
+        return 'Low';
+    }
+  }
+
+  String get apiValue {
+    return this.toString().split('.').last;
+  }
 }
 
 class BugReport {
   final int id;
   final String description;
-  final String creator;
-  final int creatorId;
-  final String recipient;
-  final int recipientId;
-  final List<int> ccRecipients;
+  final String imageUrl;
+  final String? creator;
+  final int? creatorId;
+  final String? recipient;
+  final int? recipientId;
+  final List<String> ccRecipients;
   final SeverityLevel severity;
-  final DateTime createdDate;
   final DateTime modifiedDate;
   final BugStatus status;
+  final String mediaType;
+  final int? projectId;
   final String? projectName;
-  final String? imageUrl;
-  final String? mediaType;
   final String? tabUrl;
 
   BugReport({
     required this.id,
     required this.description,
-    required this.creator,
-    required this.creatorId,
-    required this.recipient,
-    required this.recipientId,
+    required this.imageUrl,
+    this.creator,
+    this.creatorId,
+    this.recipient,
+    this.recipientId,
     required this.ccRecipients,
     required this.severity,
-    required this.createdDate,
     required this.modifiedDate,
     required this.status,
+    required this.mediaType,
+    this.projectId,
     this.projectName,
-    this.imageUrl,
-    this.mediaType,
     this.tabUrl,
   });
 
+  factory BugReport.fromJson(Map<String, dynamic> json) {
+    try {
+      return BugReport(
+        id: json['id'] as int,
+        description: json['description'] as String,
+        imageUrl: json['image_url'] as String,
+        creator: json['creator']?.toString(),
+        creatorId: json['creator_id'] as int?,
+        recipient: json['recipient']?.toString(),
+        recipientId: json['recipient_id'] as int?,
+        ccRecipients: (json['cc_recipients'] as List<dynamic>?)
+            ?.map((e) => e.toString())
+            .toList() ?? [],
+        severity: _parseSeverity(json['severity'] as String),
+        modifiedDate: DateTime.parse(json['modified_date'] as String),
+        status: _parseStatus(json['status'] as String),
+        mediaType: json['media_type'] as String,
+        projectId: json['project_id'] as int?,
+        projectName: json['project_name']?.toString(),
+        tabUrl: json['tab_url']?.toString(),
+      );
+    } catch (e) {
+      print('Error parsing JSON to BugReport: $json');
+      print('Error details: $e');
+      rethrow;
+    }
+  }
+
   static BugStatus _parseStatus(String status) {
-    return BugStatus.values.firstWhere(
-      (e) => e.toString().split('.').last.toLowerCase() == status.toLowerCase(),
-      orElse: () => BugStatus.assigned,
-    );
+    try {
+      return BugStatus.values.firstWhere(
+        (e) => e.toString().split('.').last.toLowerCase() == status.toLowerCase(),
+        orElse: () => BugStatus.assigned,
+      );
+    } catch (e) {
+      print('Error parsing status: $status');
+      return BugStatus.assigned;
+    }
   }
 
   static SeverityLevel _parseSeverity(String severity) {
-    return SeverityLevel.values.firstWhere(
-      (e) => e.toString().split('.').last.toLowerCase() == severity.toLowerCase(),
-      orElse: () => SeverityLevel.low,
-    );
-  }
-
-  factory BugReport.fromJson(Map<String, dynamic> json) {
-    return BugReport(
-      id: json['id'],
-      description: json['description'],
-      creator: json['creator'],
-      creatorId: json['creator_id'],
-      recipient: json['recipient'],
-      recipientId: json['recipient_id'],
-      ccRecipients: (json['cc_recipients'] as List<dynamic>?)
-          ?.map((e) => e as int)
-          ?.toList() ?? [],
-      severity: _parseSeverity(json['severity']),
-      createdDate: DateTime.parse(json['created_date']),
-      modifiedDate: DateTime.parse(json['modified_date']),
-      status: _parseStatus(json['status']),
-      projectName: json['project_name'],
-      imageUrl: json['image_url'] as String?,
-      mediaType: json['media_type'] as String?,
-      tabUrl: json['tab_url'],
-    );
+    try {
+      return SeverityLevel.values.firstWhere(
+        (e) => e.toString().split('.').last.toLowerCase() == severity.toLowerCase(),
+        orElse: () => SeverityLevel.low,
+      );
+    } catch (e) {
+      print('Error parsing severity: $severity');
+      return SeverityLevel.low;
+    }
   }
 
   Color get severityColor {
