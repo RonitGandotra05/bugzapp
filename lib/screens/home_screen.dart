@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_fonts/google_fonts.dart';
 import '../models/bug_report.dart';
 import '../services/bug_report_service.dart';
@@ -17,6 +18,7 @@ import '../constants/api_constants.dart';
 import '../widgets/stats_panel.dart';
 import 'dart:convert';
 import 'dart:math' show pi;
+import 'package:universal_html/html.dart' as html;
 
 extension WidgetPaddingX on Widget {
   Widget paddingAll(double padding) => Padding(
@@ -43,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen> {
   BugFilterType _currentFilter = BugFilterType.all;
   File? _selectedFile;
   bool _isAscendingOrder = false;
+  Uint8List? _webImageBytes;
 
   @override
   void initState() {
@@ -658,13 +661,28 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           child: InkWell(
                             onTap: () async {
-                              FilePickerResult? result = await FilePicker.platform.pickFiles(
-                                type: FileType.image,
-                              );
-                              if (result != null) {
-                                setState(() {
-                                  _selectedFile = File(result.files.single.path!);
-                                });
+                              try {
+                                FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                  type: FileType.image,
+                                  withData: true,  // This ensures we get the bytes on web
+                                );
+                                
+                                if (result != null) {
+                                  setState(() {
+                                    if (kIsWeb) {
+                                      _webImageBytes = result.files.first.bytes;
+                                      _selectedFile = null;
+                                    } else {
+                                      _selectedFile = File(result.files.first.path!);
+                                      _webImageBytes = null;
+                                    }
+                                  });
+                                }
+                              } catch (e) {
+                                print('Error picking file: $e');
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error selecting image: $e')),
+                                );
                               }
                             },
                             borderRadius: BorderRadius.circular(12),
@@ -678,7 +696,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  _selectedFile?.path.split('/').last ?? 'Select Screenshot',
+                                  _selectedFile != null 
+                                      ? 'Image Selected'  // Generic text for both platforms
+                                      : 'Select Screenshot',
                                   style: GoogleFonts.poppins(
                                     color: Colors.grey[600],
                                   ),
@@ -687,7 +707,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         ),
-                        if (_selectedFile != null) ...[
+                        if (_selectedFile != null || _webImageBytes != null) ...[
                           const SizedBox(height: 16),
                           Container(
                             width: double.infinity,
@@ -695,31 +715,49 @@ class _HomeScreenState extends State<HomeScreen> {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(color: Colors.grey[300]!),
-                              image: DecorationImage(
-                                image: FileImage(_selectedFile!),
-                                fit: BoxFit.cover,
-                              ),
                             ),
                             child: Stack(
-                              alignment: Alignment.topRight,
+                              fit: StackFit.expand,
                               children: [
-                                // Remove image button
-                                Material(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(20),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(8.0),
+                                // Image preview
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: kIsWeb 
+                                      ? (_webImageBytes != null 
+                                          ? Image.memory(
+                                              _webImageBytes!,
+                                              fit: BoxFit.cover,
+                                            )
+                                          : Container())
+                                      : Image.file(
+                                          _selectedFile!,
+                                          fit: BoxFit.cover,
+                                        ),
+                                ),
+                                // Remove button
+                                Positioned(
+                                  top: 8,
+                                  right: 8,
+                                  child: Material(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(20),
                                     child: InkWell(
-                                      onTap: () => setState(() => _selectedFile = null),
+                                      onTap: () => setState(() {
+                                        _selectedFile = null;
+                                        _webImageBytes = null;
+                                      }),
                                       borderRadius: BorderRadius.circular(20),
-                                      child: Icon(
-                                        Icons.close,
-                                        size: 20,
-                                        color: Colors.red[400],
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(8.0),
+                                        child: Icon(
+                                          Icons.close,
+                                          size: 20,
+                                          color: Colors.red[400],
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ).paddingAll(8),
+                                ),
                               ],
                             ),
                           ),
