@@ -1,3 +1,4 @@
+import 'dart:typed_data';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../constants/api_constants.dart';
@@ -7,6 +8,8 @@ import '../utils/token_storage.dart';
 import 'dart:io';
 import '../models/user.dart';
 import '../models/project.dart';
+import 'package:dio/dio.dart';
+import 'package:http_parser/http_parser.dart';
 
 class BugReportService {
   // Add enum for severity levels
@@ -180,29 +183,47 @@ class BugReportService {
   Future<List<User>> fetchUsers() async {
     try {
       final headers = await _getAuthHeaders();
-      print('Fetching users with headers: $headers');
-
       final response = await http.get(
         Uri.parse('${ApiConstants.baseUrl}${ApiConstants.usersEndpoint}'),
         headers: headers,
       );
 
-      print('Users response status: ${response.statusCode}');
-      print('Users raw response: ${response.body}');
+      print('Users API Response: ${response.body}');
 
       if (response.statusCode == 200) {
-        final List<dynamic> names = json.decode(response.body);
+        final List<dynamic> data = json.decode(response.body);
         
-        // Convert string names to User objects with generated IDs
-        return names.map((name) => User(
-          id: names.indexOf(name), // Using index as temporary ID
-          name: name.toString(),
-          email: '', // Empty since not provided by API
-          isAdmin: false, // Default value
-        )).toList();
-        
+        // Convert the data to User objects
+        final users = data.map((item) {
+          try {
+            if (item == null) return null;
+            
+            // If it's just a string (name)
+            if (item is String) {
+              return User(
+                id: data.indexOf(item) + 1,
+                name: item,
+                email: '',
+                isAdmin: false,
+              );
+            }
+            
+            // If it's a map
+            if (item is Map<String, dynamic>) {
+              return User.fromJson(item);
+            }
+            
+            return null;
+          } catch (e) {
+            print('Error parsing user: $item');
+            print('Error: $e');
+            return null;
+          }
+        }).where((user) => user != null).cast<User>().toList();
+
+        print('Parsed Users: ${users.map((u) => '${u.name} (${u.id})')}');
+        return users;
       } else {
-        print('Failed to load users: ${response.body}');
         throw Exception('Failed to load users: ${response.body}');
       }
     } catch (e) {
@@ -211,106 +232,98 @@ class BugReportService {
     }
   }
 
-  Future<BugReport> uploadBugReport({
+  Future<void> uploadBugReport({
     required String description,
+    required List<User> availableUsers,
     File? imageFile,
+    Uint8List? imageBytes,
     String? recipientId,
     List<String> ccRecipients = const [],
-    String severity = 'low', // Default to low if not specified
+    String severity = 'low',
     String? projectId,
     String? tabUrl,
   }) async {
     try {
-      // Validate severity
-      if (!['high', 'medium', 'low'].contains(severity.toLowerCase())) {
-        throw Exception('Invalid severity level. Must be high, medium, or low');
-      }
-
-      // Validate CC recipients
-      if (ccRecipients.length > 4) {
-        throw Exception('Maximum 4 CC recipients allowed');
-      }
-
       final token = await TokenStorage.getToken();
-      var uri = Uri.parse('${ApiConstants.baseUrl}/upload');
-      var request = http.MultipartRequest('POST', uri);
-
-      // Add headers
-      request.headers.addAll({
-        'Authorization': 'Bearer $token',
+      final dio = Dio();
+      dio.options.headers['Authorization'] = 'Bearer $token';
+      
+      final url = '${ApiConstants.baseUrl}/upload';
+      print('Attempting to upload to URL: $url');
+      
+      // Get recipient name from available users
+      final recipient = availableUsers.firstWhere(
+        (user) => user.id.toString() == recipientId,
+        orElse: () => throw Exception('Recipient not found'),
+      );
+      
+      final formData = FormData.fromMap({
+        'description': description,
+        'recipient_name': recipient.name,
+        'cc_recipients': ccRecipients.isEmpty ? null : ccRecipients.join(','),
+        'severity': severity,
+        'project_id': projectId != null ? int.parse(projectId) : null,
+        'tab_url': tabUrl,
       });
 
-      // Add required fields
-      request.fields['description'] = description;
+      print('Form data fields: ${formData.fields}');
 
-      // Add optional fields only if they have values
-      if (recipientId != null) {
-        request.fields['recipient_id'] = recipientId;
-      }
-      
-      if (ccRecipients.isNotEmpty) {
-        request.fields['cc_recipients'] = jsonEncode(ccRecipients);
-      }
-      
-      request.fields['severity'] = severity.toLowerCase();
-      
-      if (projectId != null) {
-        request.fields['project_id'] = projectId;
-      }
-      
-      if (tabUrl != null) {
-        request.fields['tab_url'] = tabUrl;
-      }
-
-      // Add file if present
       if (imageFile != null) {
-        // Check file size (16MB limit)
-        if (await imageFile.length() > 16 * 1024 * 1024) {
-          throw Exception('File size exceeds 16MB limit');
-        }
-
-        var stream = http.ByteStream(imageFile.openRead());
-        var length = await imageFile.length();
-        var multipartFile = http.MultipartFile(
-          'file',
-          stream,
-          length,
-          filename: imageFile.path.split('/').last
+        print('Adding image file: ${imageFile.path}');
+        formData.files.add(
+          MapEntry(
+            'file',
+            await MultipartFile.fromFile(
+              imageFile.path,
+              filename: 'screenshot.png',
+              contentType: MediaType('image', 'png'),
+            ),
+          ),
         );
-        request.files.add(multipartFile);
+      } else if (imageBytes != null) {
+        print('Adding image bytes');
+        formData.files.add(
+          MapEntry(
+            'file',
+            MultipartFile.fromBytes(
+              imageBytes,
+              filename: 'screenshot.png',
+              contentType: MediaType('image', 'png'),
+            ),
+          ),
+        );
       }
 
-      var response = await request.send();
-      var responseBody = await response.stream.bytesToString();
+      final response = await dio.post(
+        url,
+        data: formData,
+        options: Options(
+          validateStatus: (status) => status != null && (status >= 200 && status < 300),
+          headers: {
+            'Accept': '*/*',
+            'Content-Type': 'multipart/form-data',
+          },
+        ),
+      );
 
-      if (response.statusCode != 201) {
-        throw Exception('Failed to upload bug report: $responseBody');
+      print('Response status: ${response.statusCode}');
+      print('Response data: ${response.data}');
+
+      if (response.data['message'] == 'Upload successful' && response.data['id'] != null) {
+        return;
+      } else {
+        throw Exception('Failed to create bug report: ${response.data}');
       }
-
-      // Parse the response
-      final Map<String, dynamic> responseData = json.decode(responseBody);
-      
-      // Create a BugReport object from the response
-      return BugReport.fromJson({
-        'id': responseData['id'],
-        'description': responseData['description'],
-        'creator': '', // Will be filled by backend
-        'creator_id': 0, // Will be filled by backend
-        'recipient': responseData['recipient'] ?? '',
-        'recipient_id': 0, // Will be filled by backend if recipient exists
-        'cc_recipients': responseData['cc_recipients'] ?? [],
-        'severity': responseData['severity'] ?? 'low',
-        'created_date': DateTime.now().toIso8601String(), // Will be overwritten by backend
-        'modified_date': DateTime.now().toIso8601String(), // Will be overwritten by backend
-        'status': 'assigned', // Default status for new bug reports
-        'project_name': responseData['project_name'],
-        'image_url': responseData['url'],
-        'media_type': responseData['media_type'],
-        'tab_url': responseData['tab_url'],
-      });
-
     } catch (e) {
-      throw Exception('Failed to upload bug report: $e');
+      print('Error uploading bug report: $e');
+      if (e is DioException) {
+        print('Request that failed: ${e.requestOptions.uri}');
+        print('Request headers: ${e.requestOptions.headers}');
+        print('Request data: ${e.requestOptions.data}');
+        print('Response status: ${e.response?.statusCode}');
+        print('Response data: ${e.response?.data}');
+      }
+      rethrow;
     }
   }
 

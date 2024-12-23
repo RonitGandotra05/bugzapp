@@ -1,40 +1,46 @@
+import 'dart:convert';
+
 class User {
   final int id;
   final String name;
-  final String? email;
-  final String? phone;
+  final String email;
   final bool isAdmin;
 
   User({
     required this.id,
     required this.name,
-    this.email,
-    this.phone,
-    required this.isAdmin,
+    required this.email,
+    this.isAdmin = false,
   });
 
   factory User.fromJson(dynamic json) {
     if (json is String) {
-      // Handle case where json is a string (name)
+      // If we just get a name string
       return User(
-        id: 0, // Default ID
+        id: 0,  // Temporary ID
         name: json,
+        email: '',
         isAdmin: false,
       );
-    } else if (json is Map<String, dynamic>) {
-      // Handle case where json is a Map
-      return User(
-        id: json['id'] ?? 0,
-        name: json['name'] ?? '',
-        email: json['email'],
-        phone: json['phone'],
-        isAdmin: json['is_admin'] ?? false,
-      );
-    } else {
-      throw FormatException('Invalid JSON format for User');
     }
+
+    final Map<String, dynamic> data = json is Map ? json : jsonDecode(json);
+    return User(
+      id: int.tryParse(data['id']?.toString() ?? '0') ?? 0,
+      name: data['name']?.toString() ?? '',
+      email: data['email']?.toString() ?? '',
+      isAdmin: data['is_admin'] == true,
+    );
   }
 
   @override
-  String toString() => name;  // This helps in dropdowns
+  String toString() => name;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is User && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 } 

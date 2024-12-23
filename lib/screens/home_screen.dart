@@ -57,9 +57,16 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
     try {
+      print('Starting to load data...');
       final projects = await _bugReportService.fetchProjects();
+      print('Projects loaded: ${projects.length}');
+      
       final users = await _bugReportService.fetchUsers();
+      print('Users loaded: ${users.length}');
+      print('Users: ${users.map((u) => "${u.name} (${u.id})")}');
+      
       final reports = await _bugReportService.getAllBugReports();
+      print('Reports loaded: ${reports.length}');
       
       if (mounted) {
         setState(() {
@@ -354,6 +361,11 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _showAddBugReport(BuildContext context) async {
+    // Ensure data is loaded
+    if (_availableUsers.isEmpty) {
+      await _loadData();
+    }
+    
     final _formKey = GlobalKey<FormState>();
     String? _description;
     Project? _selectedProject;
@@ -465,30 +477,59 @@ class _HomeScreenState extends State<HomeScreen> {
                   const SizedBox(height: 20),
 
                   // Recipient Dropdown
-                  DropdownButtonFormField<User>(
-                    decoration: InputDecoration(
-                      labelText: 'Recipient',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.purple[300]!),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
+                  StatefulBuilder(
+                    builder: (context, setStateDialog) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        DropdownButtonFormField<User>(
+                          decoration: InputDecoration(
+                            labelText: 'Recipient',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.grey[300]!),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide(color: Colors.purple[300]!),
+                            ),
+                            filled: true,
+                            fillColor: Colors.grey[50],
+                          ),
+                          hint: Text('Select Recipient'),
+                          value: _selectedRecipient,
+                          items: _availableUsers.map((User user) {
+                            return DropdownMenuItem<User>(
+                              value: user,
+                              child: Text(
+                                user.name,
+                                style: GoogleFonts.poppins(fontSize: 14),
+                              ),
+                            );
+                          }).toList(),
+                          validator: (value) => value == null ? 'Please select a recipient' : null,
+                          onChanged: (User? value) {
+                            print('Selected User: ${value?.name} (ID: ${value?.id})');
+                            setStateDialog(() {
+                              _selectedRecipient = value;
+                            });
+                          },
+                        ),
+                        if (_availableUsers.isEmpty && !_isLoading)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8.0),
+                            child: Text(
+                              'No users available',
+                              style: GoogleFonts.poppins(
+                                color: Colors.red[400],
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                    items: _availableUsers.map((user) {
-                      return DropdownMenuItem(
-                        value: user,
-                        child: Text(user.name),
-                      );
-                    }).toList(),
-                    onChanged: (value) => _selectedRecipient = value,
                   ),
                   const SizedBox(height: 20),
 
@@ -792,7 +833,51 @@ class _HomeScreenState extends State<HomeScreen> {
                       Expanded(
                         child: ElevatedButton(
                           onPressed: () async {
-                            // ... existing submit logic ...
+                            if (_formKey.currentState?.validate() ?? false) {
+                              _formKey.currentState?.save();
+                              
+                              if (_selectedRecipient == null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please select a recipient')),
+                                );
+                                return;
+                              }
+
+                              try {
+                                print('Selected recipient: ${_selectedRecipient?.id}');
+                                
+                                await _bugReportService.uploadBugReport(
+                                  description: _description!,
+                                  availableUsers: _availableUsers,
+                                  imageFile: _selectedFile,
+                                  imageBytes: _webImageBytes,
+                                  recipientId: _selectedRecipient!.id.toString(),
+                                  ccRecipients: _selectedCCRecipients
+                                      .map((user) => user.name)
+                                      .toList(),
+                                  severity: _selectedSeverity,
+                                  projectId: _selectedProject?.id.toString(),
+                                  tabUrl: _tabUrl,
+                                );
+                                
+                                if (mounted) {
+                                  Navigator.pop(context);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('Bug report created successfully')),
+                                  );
+                                  _loadData();
+                                }
+                              } catch (e) {
+                                print('Error creating bug report: $e');
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Error creating bug report: $e')),
+                                );
+                              }
+                            } else {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Please fill in all required fields')),
+                              );
+                            }
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.purple[400],
@@ -824,6 +909,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
 extension StringExtension on String {
   String capitalize() {
-    return "${this[0].toUpperCase()}${this.substring(1)}";
+    if (isEmpty) return this;
+    return "${this[0].toUpperCase()}${substring(1)}";
   }
 } 
