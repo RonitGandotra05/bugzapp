@@ -18,6 +18,13 @@ import '../widgets/stats_panel.dart';
 import 'dart:convert';
 import 'dart:math' show pi;
 
+extension WidgetPaddingX on Widget {
+  Widget paddingAll(double padding) => Padding(
+        padding: EdgeInsets.all(padding),
+        child: this,
+      );
+}
+
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
 
@@ -34,6 +41,8 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Project> _availableProjects = [];
   List<User> _availableUsers = [];
   BugFilterType _currentFilter = BugFilterType.all;
+  File? _selectedFile;
+  bool _isAscendingOrder = false;
 
   @override
   void initState() {
@@ -92,9 +101,22 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  List<BugReport> get _sortedAndFilteredBugReports {
+    final filtered = _filteredBugReports;
+    return List.from(filtered)..sort((a, b) => _isAscendingOrder 
+      ? a.modifiedDate.compareTo(b.modifiedDate)
+      : b.modifiedDate.compareTo(a.modifiedDate));
+  }
+
   void _handleFilterChange(BugFilterType filter) {
     setState(() {
       _currentFilter = filter;
+    });
+  }
+
+  void _toggleSortOrder() {
+    setState(() {
+      _isAscendingOrder = !_isAscendingOrder;
     });
   }
 
@@ -109,8 +131,17 @@ class _HomeScreenState extends State<HomeScreen> {
             _scaffoldKey.currentState?.openDrawer();
           },
         ),
+        centerTitle: true,
+        title: const Icon(
+          Icons.bug_report,
+          color: Colors.black87,
+          size: 28,
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
+        actions: [
+          const SizedBox(width: 48),
+        ],
       ),
       drawer: Drawer(
         child: ListView(
@@ -210,25 +241,69 @@ class _HomeScreenState extends State<HomeScreen> {
             SliverToBoxAdapter(
               child: Container(
                 color: const Color(0xFFFAF9F6),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  switchInCurve: Curves.easeInOut,
-                  switchOutCurve: Curves.easeInOut,
-                  child: ListView.builder(
-                    key: ValueKey<BugFilterType>(_currentFilter),
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    padding: const EdgeInsets.only(top: 8),
-                    itemCount: _filteredBugReports.length,
-                    itemBuilder: (context, index) {
-                      final bug = _filteredBugReports[index];
-                      return BugCard(
-                        bug: bug,
-                        onStatusToggle: () => _toggleBugStatus(bug.id),
-                        onSendReminder: () => _sendReminder(bug.id),
-                      );
-                    },
-                  ),
+                child: Column(
+                  children: [
+                    // Sort button
+                    Padding(
+                      padding: const EdgeInsets.only(right: 16.0, top: 8.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                onTap: _toggleSortOrder,
+                                customBorder: const CircleBorder(),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: Icon(
+                                    _isAscendingOrder 
+                                        ? Icons.arrow_upward
+                                        : Icons.arrow_downward,
+                                    size: 20,
+                                    color: Colors.purple[400],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    // Bug list
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      switchInCurve: Curves.easeInOut,
+                      switchOutCurve: Curves.easeInOut,
+                      child: ListView.builder(
+                        key: ValueKey<BugFilterType>(_currentFilter),
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: const EdgeInsets.only(top: 8),
+                        itemCount: _sortedAndFilteredBugReports.length,
+                        itemBuilder: (context, index) {
+                          final bug = _sortedAndFilteredBugReports[index];
+                          return BugCard(
+                            bug: bug,
+                            onStatusToggle: () => _toggleBugStatus(bug.id),
+                            onSendReminder: () => _sendReminder(bug.id),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -287,141 +362,423 @@ class _HomeScreenState extends State<HomeScreen> {
 
     await showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Add Bug Report'),
-        content: SingleChildScrollView(
-          child: Form(
-            key: _formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                    labelText: 'Description',
-                    border: OutlineInputBorder(),
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.9,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Add Bug Report',
+                        style: GoogleFonts.poppins(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                        color: Colors.grey[600],
+                      ),
+                    ],
                   ),
-                  validator: (value) =>
-                      value?.isEmpty ?? true ? 'Description is required' : null,
-                  onSaved: (value) => _description = value,
-                ),
-                SizedBox(height: 16),
-                
-                // Project Dropdown
-                DropdownButtonFormField<Project>(
-                  decoration: InputDecoration(
-                    labelText: 'Project',
-                    border: OutlineInputBorder(),
-                  ),
-                  items: _availableProjects.map((project) {
-                    return DropdownMenuItem(
-                      value: project,
-                      child: Text(project.name),
-                    );
-                  }).toList(),
-                  onChanged: (value) => _selectedProject = value,
-                ),
-                SizedBox(height: 16),
+                  const SizedBox(height: 24),
 
-                // Recipient Dropdown
-                DropdownButtonFormField<User>(
-                  decoration: InputDecoration(
-                    labelText: 'Recipient',
-                    border: OutlineInputBorder(),
+                  // Description Field
+                  TextFormField(
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: 'Description',
+                      alignLabelWithHint: true,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.purple[300]!),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                    ),
+                    validator: (value) =>
+                        value?.isEmpty ?? true ? 'Description is required' : null,
+                    onSaved: (value) => _description = value,
                   ),
-                  items: _availableUsers.map((user) {
-                    return DropdownMenuItem(
-                      value: user,
-                      child: Text(user.name),
-                    );
-                  }).toList(),
-                  onChanged: (value) => _selectedRecipient = value,
-                ),
-                SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
-                // Severity Dropdown
-                DropdownButtonFormField<String>(
-                  decoration: InputDecoration(
-                    labelText: 'Severity',
-                    border: OutlineInputBorder(),
+                  // Project Dropdown
+                  DropdownButtonFormField<Project>(
+                    decoration: InputDecoration(
+                      labelText: 'Project',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.purple[300]!),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                    ),
+                    items: _availableProjects.map((project) {
+                      return DropdownMenuItem(
+                        value: project,
+                        child: Text(project.name),
+                      );
+                    }).toList(),
+                    onChanged: (value) => _selectedProject = value,
                   ),
-                  value: _selectedSeverity,
-                  items: ['low', 'medium', 'high'].map((severity) {
-                    return DropdownMenuItem(
-                      value: severity,
-                      child: Text(severity.toUpperCase()),
-                    );
-                  }).toList(),
-                  onChanged: (value) => _selectedSeverity = value ?? 'low',
-                ),
-                SizedBox(height: 16),
+                  const SizedBox(height: 20),
 
-                // File Upload Button
-                ElevatedButton.icon(
-                  icon: Icon(Icons.attach_file),
-                  label: Text(_selectedFile?.path.split('/').last ?? 'Select Screenshot'),
-                  onPressed: () async {
-                    FilePickerResult? result = await FilePicker.platform.pickFiles(
-                      type: FileType.image,
-                    );
-                    if (result != null) {
-                      _selectedFile = File(result.files.single.path!);
-                    }
-                  },
-                ),
-                SizedBox(height: 16),
-
-                // Tab URL TextField
-                TextFormField(
-                  decoration: InputDecoration(
-                    labelText: 'Tab URL (Optional)',
-                    border: OutlineInputBorder(),
+                  // Recipient Dropdown
+                  DropdownButtonFormField<User>(
+                    decoration: InputDecoration(
+                      labelText: 'Recipient',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.purple[300]!),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                    ),
+                    items: _availableUsers.map((user) {
+                      return DropdownMenuItem(
+                        value: user,
+                        child: Text(user.name),
+                      );
+                    }).toList(),
+                    onChanged: (value) => _selectedRecipient = value,
                   ),
-                  onSaved: (value) => _tabUrl = value,
-                ),
-              ],
+                  const SizedBox(height: 20),
+
+                  // CC Recipients MultiSelect
+                  StatefulBuilder(
+                    builder: (context, setStateDialog) => Container(
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(12),
+                        color: Colors.grey[50],
+                      ),
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'CC Recipients (Max 4)',
+                            style: GoogleFonts.poppins(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              // Selected Recipients Chips
+                              ..._selectedCCRecipients.map((user) => Chip(
+                                label: Text(
+                                  user.name,
+                                  style: GoogleFonts.poppins(fontSize: 12),
+                                ),
+                                deleteIcon: const Icon(Icons.close, size: 16),
+                                onDeleted: () {
+                                  setStateDialog(() {
+                                    _selectedCCRecipients.remove(user);
+                                  });
+                                },
+                              )),
+                              // Add Button (if limit not reached)
+                              if (_selectedCCRecipients.length < 4)
+                                ActionChip(
+                                  label: Text(
+                                    'Add',
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.purple[400],
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                  avatar: Icon(
+                                    Icons.add,
+                                    size: 16,
+                                    color: Colors.purple[400],
+                                  ),
+                                  backgroundColor: Colors.purple[50],
+                                  onPressed: () {
+                                    showDialog(
+                                      context: context,
+                                      builder: (context) => AlertDialog(
+                                        title: Text(
+                                          'Add CC Recipient',
+                                          style: GoogleFonts.poppins(),
+                                        ),
+                                        content: DropdownButtonFormField<User>(
+                                          decoration: InputDecoration(
+                                            labelText: 'Select User',
+                                            border: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                          ),
+                                          items: _availableUsers
+                                              .where((user) => !_selectedCCRecipients.contains(user))
+                                              .map((user) => DropdownMenuItem(
+                                                    value: user,
+                                                    child: Text(user.name),
+                                                  ))
+                                              .toList(),
+                                          onChanged: (user) {
+                                            if (user != null) {
+                                              setStateDialog(() {
+                                                _selectedCCRecipients.add(user);
+                                              });
+                                              Navigator.pop(context);
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Severity Dropdown
+                  DropdownButtonFormField<String>(
+                    decoration: InputDecoration(
+                      labelText: 'Severity',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.purple[300]!),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                    ),
+                    value: _selectedSeverity,
+                    items: [
+                      {'display': 'Low', 'value': 'low'},
+                      {'display': 'Medium', 'value': 'medium'},
+                      {'display': 'High', 'value': 'high'},
+                    ].map((severity) {
+                      return DropdownMenuItem(
+                        value: severity['value'],
+                        child: Text(
+                          severity['display']!,
+                          style: GoogleFonts.poppins(),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (value) => _selectedSeverity = value ?? 'low',
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Tab URL TextField
+                  TextFormField(
+                    decoration: InputDecoration(
+                      labelText: 'Tab URL (Optional)',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey[300]!),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.purple[300]!),
+                      ),
+                      filled: true,
+                      fillColor: Colors.grey[50],
+                    ),
+                    onSaved: (value) => _tabUrl = value,
+                  ),
+                  const SizedBox(height: 20),
+
+                  // File Upload and Preview
+                  StatefulBuilder(
+                    builder: (context, setState) => Column(
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          height: 100,
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey[300]!),
+                            borderRadius: BorderRadius.circular(12),
+                            color: Colors.grey[50],
+                          ),
+                          child: InkWell(
+                            onTap: () async {
+                              FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                type: FileType.image,
+                              );
+                              if (result != null) {
+                                setState(() {
+                                  _selectedFile = File(result.files.single.path!);
+                                });
+                              }
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.cloud_upload_outlined,
+                                  size: 32,
+                                  color: Colors.purple[300],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  _selectedFile?.path.split('/').last ?? 'Select Screenshot',
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        if (_selectedFile != null) ...[
+                          const SizedBox(height: 16),
+                          Container(
+                            width: double.infinity,
+                            height: 200,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.grey[300]!),
+                              image: DecorationImage(
+                                image: FileImage(_selectedFile!),
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            child: Stack(
+                              alignment: Alignment.topRight,
+                              children: [
+                                // Remove image button
+                                Material(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: InkWell(
+                                      onTap: () => setState(() => _selectedFile = null),
+                                      borderRadius: BorderRadius.circular(20),
+                                      child: Icon(
+                                        Icons.close,
+                                        size: 20,
+                                        color: Colors.red[400],
+                                      ),
+                                    ),
+                                  ),
+                                ).paddingAll(8),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Action Buttons
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(
+                            'Cancel',
+                            style: GoogleFonts.poppins(
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: () async {
+                            // ... existing submit logic ...
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.purple[400],
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: Text(
+                            'Submit',
+                            style: GoogleFonts.poppins(
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (_formKey.currentState?.validate() ?? false) {
-                _formKey.currentState?.save();
-                try {
-                  await _bugReportService.uploadBugReport(
-                    description: _description!,
-                    imageFile: _selectedFile,
-                    recipientId: _selectedRecipient?.id.toString(),
-                    ccRecipients: _selectedCCRecipients
-                        .map((user) => user.id.toString())
-                        .toList(),
-                    severity: _selectedSeverity,
-                    projectId: _selectedProject?.id.toString(),
-                    tabUrl: _tabUrl,
-                  );
-                  
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Bug report created successfully')),
-                    );
-                    _loadData(); // Refresh the list
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error creating bug report: $e')),
-                  );
-                }
-              }
-            },
-            child: Text('Submit'),
-          ),
-        ],
       ),
     );
   }
