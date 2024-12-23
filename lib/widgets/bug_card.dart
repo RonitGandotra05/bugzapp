@@ -37,33 +37,48 @@ class BugCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Get screen width to maintain consistent card size
     final screenWidth = MediaQuery.of(context).size.width;
     final cardWidth = screenWidth > 600 ? 400.0 : screenWidth * 0.9;
 
-    // Define colors based on status
-    final backgroundColor = bug.status == BugStatus.assigned
-        ? const Color(0xFFFFEBEE)  // More noticeable red background
-        : const Color(0xFFE8F5E9); // More noticeable green background
+    // Define more vibrant, metallic-like gradients
+    final assignedGradient = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        const Color(0xFFFF1744).withOpacity(0.1),  // Vibrant red
+        const Color(0xFFD50000).withOpacity(0.05),  // Deep red
+        const Color(0xFFFF5252).withOpacity(0.1),  // Light red
+      ],
+    );
 
-    final borderColor = bug.status == BugStatus.assigned
-        ? const Color(0xFFFFCDD2)  // Stronger red border
-        : const Color(0xFFC8E6C9); // Stronger green border
+    final resolvedGradient = LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        const Color(0xFF00C853).withOpacity(0.1),  // Vibrant green
+        const Color(0xFF1B5E20).withOpacity(0.05),  // Deep green
+        const Color(0xFF69F0AE).withOpacity(0.1),  // Light green
+      ],
+    );
 
     return Center(
       child: Container(
         width: cardWidth,
         margin: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: backgroundColor,
+          gradient: bug.status == BugStatus.assigned ? assignedGradient : resolvedGradient,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: borderColor,
+            color: bug.status == BugStatus.assigned 
+                ? const Color(0xFFFF1744).withOpacity(0.3)  // Red border
+                : const Color(0xFF00C853).withOpacity(0.3), // Green border
             width: 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: (bug.status == BugStatus.assigned 
+                  ? const Color(0xFFFF1744) 
+                  : const Color(0xFF00C853)).withOpacity(0.1),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -213,33 +228,33 @@ class BugCard extends StatelessWidget {
   }
 
   Widget _buildStatusChip({required String text, required Color color}) {
-    final chipColor = text.toLowerCase().contains('assigned') 
-        ? const Color(0xFFE53935)  // Brighter red for assigned
-        : const Color(0xFF43A047); // Brighter green for resolved
+    final isAssigned = text.toLowerCase().contains('assigned');
+    final chipColor = isAssigned
+        ? const Color(0xFFFF1744)  // Vibrant red
+        : const Color(0xFF00C853); // Vibrant green
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: chipColor.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: chipColor.withOpacity(0.4),  // Increased border opacity
-          width: 0.5,
-        ),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            chipColor.withOpacity(0.25),  // Increased gradient opacity
+            chipColor.withOpacity(0.3),
             chipColor.withOpacity(0.2),
-            chipColor.withOpacity(0.15),
+            chipColor.withOpacity(0.3),
           ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: chipColor.withOpacity(0.5),
+          width: 1,
         ),
       ),
       child: Text(
         text,
         style: GoogleFonts.poppins(
-          color: chipColor,  // Full opacity for text
+          color: chipColor,
           fontWeight: FontWeight.w500,
           fontSize: 11,
         ),

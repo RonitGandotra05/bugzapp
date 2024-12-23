@@ -33,6 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
   List<BugReport> _bugReports = [];
   List<Project> _availableProjects = [];
   List<User> _availableUsers = [];
+  BugFilterType _currentFilter = BugFilterType.all;
 
   @override
   void initState() {
@@ -77,6 +78,24 @@ class _HomeScreenState extends State<HomeScreen> {
         _userName = data['sub'].toString().split('@')[0];  // Get username from email
       });
     }
+  }
+
+  List<BugReport> get _filteredBugReports {
+    switch (_currentFilter) {
+      case BugFilterType.resolved:
+        return _bugReports.where((bug) => bug.status == BugStatus.resolved).toList();
+      case BugFilterType.pending:
+        return _bugReports.where((bug) => bug.status == BugStatus.assigned).toList();
+      case BugFilterType.all:
+      default:
+        return _bugReports;
+    }
+  }
+
+  void _handleFilterChange(BugFilterType filter) {
+    setState(() {
+      _currentFilter = filter;
+    });
   }
 
   @override
@@ -162,51 +181,59 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-      body: Column(
-        children: [
-          // Purple header section
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  const Color(0xFF9575CD),
-                  const Color(0xFF7E57C2),
-                  const Color(0xFF673AB7),
-                ],
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              const Color(0xFF9575CD),
+              const Color(0xFF7E57C2),
+              const Color(0xFF673AB7),
+            ],
+          ),
+        ),
+        child: CustomScrollView(
+          slivers: [
+            // Stats Panel
+            SliverToBoxAdapter(
+              child: StatsPanel(
+                userName: _userName.capitalize(),
+                totalBugs: _bugReports.length,
+                resolvedBugs: _bugReports.where((bug) => bug.status == BugStatus.resolved).length,
+                pendingBugs: _bugReports.where((bug) => bug.status == BugStatus.assigned).length,
+                onFilterChange: _handleFilterChange,
+                currentFilter: _currentFilter,
               ),
             ),
-            child: StatsPanel(
-              userName: _userName.capitalize(),
-              totalBugs: _bugReports.length,
-              resolvedBugs: _bugReports.where((bug) => bug.status == BugStatus.resolved).length,
-              pendingBugs: _bugReports.where((bug) => bug.status == BugStatus.assigned).length,
-            ),
-          ),
-          // Cream colored content area
-          Expanded(
-            child: Container(
-              color: const Color(0xFFFAF9F6), // Light cream color
-              child: SingleChildScrollView(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  physics: NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.only(top: 8),
-                  itemCount: _bugReports.length,
-                  itemBuilder: (context, index) {
-                    final bug = _bugReports[index];
-                    return BugCard(
-                      bug: bug,
-                      onStatusToggle: () => _toggleBugStatus(bug.id),
-                      onSendReminder: () => _sendReminder(bug.id),
-                    );
-                  },
+            // Bug List
+            SliverToBoxAdapter(
+              child: Container(
+                color: const Color(0xFFFAF9F6),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 300),
+                  switchInCurve: Curves.easeInOut,
+                  switchOutCurve: Curves.easeInOut,
+                  child: ListView.builder(
+                    key: ValueKey<BugFilterType>(_currentFilter),
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.only(top: 8),
+                    itemCount: _filteredBugReports.length,
+                    itemBuilder: (context, index) {
+                      final bug = _filteredBugReports[index];
+                      return BugCard(
+                        bug: bug,
+                        onStatusToggle: () => _toggleBugStatus(bug.id),
+                        onSendReminder: () => _sendReminder(bug.id),
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddBugReport(context),

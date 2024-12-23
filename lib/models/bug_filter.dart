@@ -7,6 +7,12 @@ enum BugSortOption {
   status
 }
 
+enum BugFilterType {
+  all,
+  resolved,
+  pending,
+}
+
 class BugFilter {
   final String? project;
   final String? creator;
