@@ -30,65 +30,59 @@ extension SeverityLevelExtension on SeverityLevel {
 
 class BugReport {
   final int id;
+  final String? imageUrl;
   final String description;
-  final String imageUrl;
+  final int? creator_id;
+  final int? recipient_id;
   final String? creator;
-  final int? creatorId;
   final String? recipient;
-  final int? recipientId;
-  final List<String> ccRecipients;
-  final SeverityLevel severity;
-  final DateTime modifiedDate;
   final BugStatus status;
   final String mediaType;
+  final DateTime modifiedDate;
+  final String severity;
   final int? projectId;
   final String? projectName;
   final String? tabUrl;
+  final List<String> ccRecipients;
 
   BugReport({
     required this.id,
+    this.imageUrl,
     required this.description,
-    required this.imageUrl,
+    this.creator_id,
+    this.recipient_id,
     this.creator,
-    this.creatorId,
     this.recipient,
-    this.recipientId,
-    required this.ccRecipients,
-    required this.severity,
-    required this.modifiedDate,
     required this.status,
     required this.mediaType,
+    required this.modifiedDate,
+    required this.severity,
     this.projectId,
     this.projectName,
     this.tabUrl,
+    this.ccRecipients = const [],
   });
 
   factory BugReport.fromJson(Map<String, dynamic> json) {
-    try {
-      return BugReport(
-        id: json['id'] as int,
-        description: json['description'] as String,
-        imageUrl: json['image_url'] as String,
-        creator: json['creator']?.toString(),
-        creatorId: json['creator_id'] as int?,
-        recipient: json['recipient']?.toString(),
-        recipientId: json['recipient_id'] as int?,
-        ccRecipients: (json['cc_recipients'] as List<dynamic>?)
-            ?.map((e) => e.toString())
-            .toList() ?? [],
-        severity: _parseSeverity(json['severity'] as String),
-        modifiedDate: DateTime.parse(json['modified_date'] as String),
-        status: _parseStatus(json['status'] as String),
-        mediaType: json['media_type'] as String,
-        projectId: json['project_id'] as int?,
-        projectName: json['project_name']?.toString(),
-        tabUrl: json['tab_url']?.toString(),
-      );
-    } catch (e) {
-      print('Error parsing JSON to BugReport: $json');
-      print('Error details: $e');
-      rethrow;
-    }
+    return BugReport(
+      id: json['id'] as int,
+      imageUrl: json['image_url'] as String?,
+      description: json['description'] as String,
+      creator_id: json['creator_id'] as int?,
+      recipient_id: json['recipient_id'] as int?,
+      creator: json['creator'] as String?,
+      recipient: json['recipient'] as String?,
+      status: _parseStatus(json['status'] as String),
+      mediaType: json['media_type'] as String,
+      modifiedDate: DateTime.parse(json['modified_date'] as String),
+      severity: json['severity'] as String,
+      projectId: json['project_id'] as int?,
+      projectName: json['project_name'] as String?,
+      tabUrl: json['tab_url'] as String?,
+      ccRecipients: (json['cc_recipients'] as List<dynamic>?)
+          ?.map((e) => e.toString())
+          .toList() ?? [],
+    );
   }
 
   static BugStatus _parseStatus(String status) {

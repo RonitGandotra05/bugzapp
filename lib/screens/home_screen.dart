@@ -20,6 +20,12 @@ import 'dart:convert';
 import 'dart:math' show pi;
 import 'package:universal_html/html.dart' as html;
 
+enum BugFilter {
+  all,
+  createdByMe,
+  assignedToMe,
+}
+
 extension WidgetPaddingX on Widget {
   Widget paddingAll(double padding) => Padding(
         padding: EdgeInsets.all(padding),
@@ -46,6 +52,8 @@ class _HomeScreenState extends State<HomeScreen> {
   File? _selectedFile;
   bool _isAscendingOrder = false;
   Uint8List? _webImageBytes;
+  BugFilter _currentBugFilter = BugFilter.all;
+  int? _currentUserId;
 
   @override
   void initState() {
@@ -55,19 +63,34 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+    if (mounted) {
+      setState(() => _isLoading = true);
+    }
+    
     try {
-      print('Starting to load data...');
       final projects = await _bugReportService.fetchProjects();
-      print('Projects loaded: ${projects.length}');
-      
       final users = await _bugReportService.fetchUsers();
-      print('Users loaded: ${users.length}');
-      print('Users: ${users.map((u) => "${u.name} (${u.id})")}');
       
-      final reports = await _bugReportService.getAllBugReports();
-      print('Reports loaded: ${reports.length}');
-      
+      List<BugReport> reports = [];
+      if (_currentUserId != null) {
+        switch (_currentBugFilter) {
+          case BugFilter.createdByMe:
+            print('Fetching created bugs for user: $_currentUserId');
+            reports = await _bugReportService.getCreatedBugReports(_currentUserId!);
+            break;
+          case BugFilter.assignedToMe:
+            print('Fetching assigned bugs for user: $_currentUserId');
+            reports = await _bugReportService.getReceivedBugReports(_currentUserId!);
+            break;
+          case BugFilter.all:
+          default:
+            reports = await _bugReportService.getAllBugReports();
+            break;
+        }
+      } else {
+        reports = await _bugReportService.getAllBugReports();
+      }
+
       if (mounted) {
         setState(() {
           _availableProjects = projects;
@@ -90,25 +113,106 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadUserName() async {
     final token = await TokenStorage.getToken();
     if (token != null) {
-      setState(() {
-        final email = token.split('.')[1];
-        final decoded = utf8.decode(base64Url.decode(base64Url.normalize(email)));
+      try {
+        final parts = token.split('.');
+        if (parts.length != 3) {
+          print('Invalid token format');
+          return;
+        }
+
+        final payload = parts[1];
+        final normalized = base64Url.normalize(payload);
+        final decoded = utf8.decode(base64Url.decode(normalized));
         final data = json.decode(decoded);
-        _userName = data['sub'].toString().split('@')[0];  // Get username from email
+        
+        print('Token payload: $data'); // Debug print
+        
+        setState(() {
+          _userName = data['sub'].toString().split('@')[0];
+          // Get ID from sub claim which contains the email
+          final userEmail = data['sub'].toString();
+          // Fetch user details to get ID
+          _fetchUserIdByEmail(userEmail);
+        });
+      } catch (e) {
+        print('Error decoding token: $e');
+      }
+    }
+  }
+
+  Future<void> _fetchUserIdByEmail(String email) async {
+    try {
+      final users = await _bugReportService.fetchUsers();
+      final user = users.firstWhere(
+        (u) => u.email.toLowerCase() == email.toLowerCase(),
+        orElse: () => throw Exception('User not found'),
+      );
+      setState(() {
+        _currentUserId = user.id;
       });
+      print('Current user ID: $_currentUserId'); // Debug print
+      _loadData(); // Reload data with correct user ID
+    } catch (e) {
+      print('Error fetching user ID: $e');
     }
   }
 
   List<BugReport> get _filteredBugReports {
+    List<BugReport> filtered = [];
+    
+    // First apply status filter
     switch (_currentFilter) {
       case BugFilterType.resolved:
-        return _bugReports.where((bug) => bug.status == BugStatus.resolved).toList();
+        filtered = _bugReports.where((bug) => bug.status == BugStatus.resolved).toList();
+        break;
       case BugFilterType.pending:
-        return _bugReports.where((bug) => bug.status == BugStatus.assigned).toList();
+        filtered = _bugReports.where((bug) => bug.status == BugStatus.assigned).toList();
+        break;
       case BugFilterType.all:
       default:
-        return _bugReports;
+        filtered = _bugReports;
     }
+    
+    // Then apply user filter
+    switch (_currentBugFilter) {
+      case BugFilter.createdByMe:
+        // Find current user from available users by email
+        final currentUser = _availableUsers.firstWhere(
+          (user) => user.email.toLowerCase() == '${_userName.toLowerCase()}@gmail.com',
+          orElse: () => User(id: 0, name: '', email: '', isAdmin: false),
+        );
+        
+        print('Filtering by creator - Current user ID: ${currentUser.id}');
+        filtered = filtered.where((bug) => bug.creator_id == currentUser.id).toList();
+        break;
+        
+      case BugFilter.assignedToMe:
+        // Find current user from available users by email
+        final currentUser = _availableUsers.firstWhere(
+          (user) => user.email.toLowerCase() == '${_userName.toLowerCase()}@gmail.com',
+          orElse: () => User(id: 0, name: '', email: '', isAdmin: false),
+        );
+        
+        print('Filtering by recipient - Current user ID: ${currentUser.id}');
+        filtered = filtered.where((bug) => bug.recipient_id == currentUser.id).toList();
+        break;
+        
+      case BugFilter.all:
+      default:
+        // No additional filtering needed
+        break;
+    }
+
+    print('Current filter: $_currentBugFilter');
+    print('Current user email: ${_userName}@gmail.com');
+    print('Available users: ${_availableUsers.map((u) => "${u.name} (${u.id})")}');
+    print('Filtered bugs count: ${filtered.length}');
+    if (filtered.isNotEmpty) {
+      final sample = filtered.first;
+      print('Sample bug - Creator ID: ${sample.creator_id}, Recipient ID: ${sample.recipient_id}');
+    }
+    
+    return filtered;
   }
 
   List<BugReport> get _sortedAndFilteredBugReports {
@@ -143,6 +247,13 @@ class _HomeScreenState extends State<HomeScreen> {
         SnackBar(content: Text('Error deleting bug report: $e')),
       );
     }
+  }
+
+  void _handleBugFilterChange(BugFilter filter) {
+    setState(() {
+      _currentBugFilter = filter;
+      _loadData();
+    });
   }
 
   @override
@@ -274,6 +385,107 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.end,
                         children: [
+                          // Filter Button
+                          Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: PopupMenuButton<BugFilter>(
+                                icon: Icon(
+                                  Icons.filter_list,
+                                  size: 20,
+                                  color: Colors.purple[400],
+                                ),
+                                initialValue: _currentBugFilter,
+                                onSelected: (BugFilter filter) {
+                                  _handleBugFilterChange(filter);
+                                },
+                                itemBuilder: (BuildContext context) => [
+                                  PopupMenuItem(
+                                    value: BugFilter.all,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.all_inbox,
+                                          color: _currentBugFilter == BugFilter.all
+                                              ? Colors.purple[400]
+                                              : Colors.grey,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'All Bugs',
+                                          style: TextStyle(
+                                            color: _currentBugFilter == BugFilter.all
+                                                ? Colors.purple[400]
+                                                : Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: BugFilter.createdByMe,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.create,
+                                          color: _currentBugFilter == BugFilter.createdByMe
+                                              ? Colors.purple[400]
+                                              : Colors.grey,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Created by Me',
+                                          style: TextStyle(
+                                            color: _currentBugFilter == BugFilter.createdByMe
+                                                ? Colors.purple[400]
+                                                : Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: BugFilter.assignedToMe,
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          Icons.assignment_ind,
+                                          color: _currentBugFilter == BugFilter.assignedToMe
+                                              ? Colors.purple[400]
+                                              : Colors.grey,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Text(
+                                          'Assigned to Me',
+                                          style: TextStyle(
+                                            color: _currentBugFilter == BugFilter.assignedToMe
+                                                ? Colors.purple[400]
+                                                : Colors.grey[600],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          // Existing Sort Button
                           Container(
                             decoration: BoxDecoration(
                               color: Colors.white,
@@ -312,22 +524,45 @@ class _HomeScreenState extends State<HomeScreen> {
                       duration: const Duration(milliseconds: 300),
                       switchInCurve: Curves.easeInOut,
                       switchOutCurve: Curves.easeInOut,
-                      child: ListView.builder(
-                        key: ValueKey<BugFilterType>(_currentFilter),
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        padding: const EdgeInsets.only(top: 8),
-                        itemCount: _sortedAndFilteredBugReports.length,
-                        itemBuilder: (context, index) {
-                          final bug = _sortedAndFilteredBugReports[index];
-                          return BugCard(
-                            bug: bug,
-                            onStatusToggle: () => _toggleBugStatus(bug.id),
-                            onSendReminder: () => _sendReminder(bug.id),
-                            onDelete: () => _deleteBugReport(bug.id),
-                          );
-                        },
-                      ),
+                      child: _isLoading 
+                        ? Center(
+                            child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
+                            ),
+                          )
+                        : _sortedAndFilteredBugReports.isEmpty
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(16.0),
+                                child: Text(
+                                  _currentBugFilter == BugFilter.createdByMe
+                                    ? 'No bugs created by you'
+                                    : _currentBugFilter == BugFilter.assignedToMe
+                                      ? 'No bugs assigned to you'
+                                      : 'No bugs found',
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.grey[600],
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : ListView.builder(
+                              key: ValueKey<BugFilterType>(_currentFilter),
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              padding: const EdgeInsets.only(top: 8),
+                              itemCount: _sortedAndFilteredBugReports.length,
+                              itemBuilder: (context, index) {
+                                final bug = _sortedAndFilteredBugReports[index];
+                                return BugCard(
+                                  bug: bug,
+                                  onStatusToggle: () => _toggleBugStatus(bug.id),
+                                  onSendReminder: () => _sendReminder(bug.id),
+                                  onDelete: () => _deleteBugReport(bug.id),
+                                );
+                              },
+                            ),
                     ),
                   ],
                 ),
