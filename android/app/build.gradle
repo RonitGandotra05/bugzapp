@@ -42,3 +42,9 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Remove these lines if they exist:
+    // implementation platform('com.google.firebase:firebase-bom:x.x.x')
+    // implementation 'com.google.firebase:firebase-messaging'
+}

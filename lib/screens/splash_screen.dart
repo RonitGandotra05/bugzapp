@@ -76,7 +76,7 @@ class _SplashScreenState extends State<SplashScreen> {
                 alignment: Alignment.center,
                 children: [
                   Text(
-                    'BugzApp',
+                    'BugZapp',
                     style: GoogleFonts.poppins(
                       fontSize: 32,
                       fontWeight: FontWeight.bold,
@@ -104,7 +104,7 @@ class _SplashScreenState extends State<SplashScreen> {
                       ],
                     ).createShader(bounds),
                     child: Text(
-                      'BugzApp',
+                      'BugZapp',
                       style: GoogleFonts.poppins(
                         fontSize: 32,
                         fontWeight: FontWeight.bold,
