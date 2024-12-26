@@ -32,6 +32,11 @@ class BugReportService {
   static DateTime? _projectsCacheTimestamp;
   static const projectsCacheDuration = Duration(minutes: 5);
 
+  // Cache for projects and their bug reports
+  static final Map<int, List<BugReport>> _projectBugReportsCache = {};
+  static final Map<int, DateTime> _projectBugReportsCacheTimestamp = {};
+  static const _projectBugReportsCacheDuration = Duration(minutes: 5);
+
   Future<Map<String, String>> _getAuthHeaders() async {
     final token = await TokenStorage.getToken();
     return {
@@ -316,11 +321,11 @@ class BugReportService {
   }
 
   // Get projects
-  Future<List<Project>> fetchProjects() async {
+  Future<List<Project>> fetchProjects({bool fromCache = true}) async {
     final now = DateTime.now();
     
     // Return cached projects if available and not expired
-    if (_projectsCache != null && 
+    if (fromCache && _projectsCache != null && 
         _projectsCacheTimestamp != null && 
         now.difference(_projectsCacheTimestamp!) < projectsCacheDuration) {
       return _projectsCache!;
@@ -685,7 +690,17 @@ class BugReportService {
   }
 
   // Get bug reports in project
-  Future<List<BugReport>> getBugReportsInProject(int projectId) async {
+  Future<List<BugReport>> getBugReportsInProject(int projectId, {bool fromCache = true}) async {
+    final now = DateTime.now();
+    
+    // Return cached bug reports if available and not expired
+    if (fromCache && 
+        _projectBugReportsCache.containsKey(projectId) && 
+        _projectBugReportsCacheTimestamp.containsKey(projectId) &&
+        now.difference(_projectBugReportsCacheTimestamp[projectId]!) < _projectBugReportsCacheDuration) {
+      return _projectBugReportsCache[projectId]!;
+    }
+
     try {
       final headers = await _getAuthHeaders();
       final response = await http.get(
@@ -695,13 +710,19 @@ class BugReportService {
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => BugReport.fromJson(json)).toList();
+        final bugReports = data.map((json) => BugReport.fromJson(json)).toList();
+        
+        // Update cache
+        _projectBugReportsCache[projectId] = bugReports;
+        _projectBugReportsCacheTimestamp[projectId] = now;
+        
+        return bugReports;
       } else {
         throw Exception('Failed to load bug reports for project');
       }
     } catch (e, stackTrace) {
       _logger.error('Error loading bug reports for project', error: e, stackTrace: stackTrace);
-      rethrow;
+      return _projectBugReportsCache[projectId] ?? []; // Return cached bug reports on error if available
     }
   }
 } 

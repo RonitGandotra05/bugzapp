@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/bug_report_service.dart';
 import '../models/project.dart';
@@ -26,21 +27,33 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
   @override
   void initState() {
     super.initState();
+    // Load projects immediately
     _loadProjects();
   }
 
   Future<void> _loadProjects() async {
     try {
-      final projects = await _bugReportService.fetchProjects();
-      setState(() {
-        _projects = projects;
-        _isLoading = false;
-      });
+      // First, try to get projects from cache
+      final cachedProjects = await _bugReportService.fetchProjects(fromCache: true);
+      if (mounted && cachedProjects.isNotEmpty) {
+        setState(() {
+          _projects = cachedProjects;
+          _isLoading = false;
+        });
+      }
+
+      // Then fetch fresh data in background
+      final freshProjects = await _bugReportService.fetchProjects(fromCache: false);
+      if (mounted && !listEquals(freshProjects, _projects)) {
+        setState(() {
+          _projects = freshProjects;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading projects: $e')),
         );
@@ -50,21 +63,25 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
 
   Future<void> _loadProjectBugReports(int projectId) async {
     try {
-      setState(() {
-        _isLoading = true;
-      });
-      
-      final bugReports = await _bugReportService.getBugReportsInProject(projectId);
-      
-      if (!mounted) return;
-      
-      setState(() {
-        _projectBugReports = _sortBugReports(bugReports);
-        _isLoading = false;
-      });
+      // First, try to get bug reports from cache
+      final cachedBugReports = await _bugReportService.getBugReportsInProject(projectId, fromCache: true);
+      if (mounted && cachedBugReports.isNotEmpty) {
+        setState(() {
+          _projectBugReports = _sortBugReports(cachedBugReports);
+          _isLoading = false;
+        });
+      }
+
+      // Then fetch fresh data in background
+      final freshBugReports = await _bugReportService.getBugReportsInProject(projectId, fromCache: false);
+      if (mounted && !listEquals(freshBugReports, _projectBugReports)) {
+        setState(() {
+          _projectBugReports = _sortBugReports(freshBugReports);
+        });
+      }
 
       // Pre-fetch comments for each bug report in the background
-      for (final bug in bugReports) {
+      for (final bug in _projectBugReports) {
         _bugReportService.getComments(bug.id).then((comments) {
           // Comments are now cached
         }).catchError((e) {
@@ -73,10 +90,10 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
         });
       }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading bug reports: $e')),
         );
