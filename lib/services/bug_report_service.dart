@@ -1,17 +1,20 @@
-import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
-import '../constants/api_constants.dart';
-import '../models/bug_report.dart';
-import '../models/comment.dart';
-import '../utils/token_storage.dart';
-import 'dart:io';
-import '../models/user.dart';
-import '../models/project.dart';
 import 'package:dio/dio.dart';
 import 'package:http_parser/http_parser.dart';
+import 'dart:io';
+import '../models/bug_report.dart';
+import '../models/user.dart';
+import '../models/project.dart';
+import '../models/comment.dart';
+import '../constants/api_constants.dart';
+import '../utils/token_storage.dart';
+import '../services/logging_service.dart';
 
 class BugReportService {
+  final LoggingService _logger = LoggingService();
+  
   // Add enum for severity levels
   static const Map<String, String> severityDisplayMap = {
     'high': 'High',
@@ -27,71 +30,66 @@ class BugReportService {
     };
   }
 
-  Future<List<BugReport>> getAllBugReports() async {
+  // Get current user
+  Future<User> getCurrentUser() async {
     try {
-      final token = await TokenStorage.getToken();
-      print('Using token: $token'); // Debug token
-
-      final url = '${ApiConstants.baseUrl}${ApiConstants.bugReportsEndpoint}';
-      print('Fetching from URL: $url'); // Debug URL
-
+      final headers = await _getAuthHeaders();
       final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Authorization': 'Bearer $token',
-        },
+        Uri.parse('${ApiConstants.baseUrl}/users/me'),
+        headers: headers,
       );
-
-      print('Response status code: ${response.statusCode}'); // Debug status
-      print('Response headers: ${response.headers}'); // Debug headers
-      print('Raw response body: ${response.body}'); // Debug body
-
       if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body) as List<dynamic>;
-        print('Parsed data: $data');
-
-        return data.map((item) {
-          print('Processing item: $item'); // Debug each item
-          if (item is! Map<String, dynamic>) {
-            print('Invalid item format: $item');
-            throw Exception('Invalid data format from server');
-          }
-          try {
-            return BugReport.fromJson(item);
-          } catch (e) {
-            print('Error parsing bug report: $e');
-            print('Problematic JSON: $item');
-            rethrow;
-          }
-        }).toList();
+        return User.fromJson(json.decode(response.body));
       } else {
-        throw Exception('Failed to load bug reports: ${response.body}');
+        throw Exception('Failed to get current user');
       }
-    } catch (e) {
-      print('Error in getAllBugReports: $e');
-      throw Exception('Error getting bug reports: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error getting current user', error: e, stackTrace: stackTrace);
+      rethrow;
     }
   }
 
-  Future<List<BugReport>> getUserBugReports(int userId) async {
+  // Get bug reports created by current user
+  Future<List<BugReport>> getCreatedBugReports(int userId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}/users/$userId/created_bug_reports'),
+        headers: headers,
+      );
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((json) => BugReport.fromJson(json)).toList();
+      } else {
+        throw Exception('Failed to load created bug reports');
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error loading created bug reports', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Get bug reports assigned to current user
+  Future<List<BugReport>> getAssignedBugReports(int userId) async {
     try {
       final headers = await _getAuthHeaders();
       final response = await http.get(
         Uri.parse('${ApiConstants.baseUrl}/users/$userId/received_bug_reports'),
         headers: headers,
       );
-
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
         return data.map((json) => BugReport.fromJson(json)).toList();
       } else {
-        throw Exception('Failed to load user bug reports: ${response.body}');
+        throw Exception('Failed to load assigned bug reports');
       }
-    } catch (e) {
-      throw Exception('Failed to connect to server: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error loading assigned bug reports', error: e, stackTrace: stackTrace);
+      rethrow;
     }
   }
 
+  // Toggle bug status
   Future<void> toggleBugStatus(int bugId) async {
     try {
       final headers = await _getAuthHeaders();
@@ -99,15 +97,16 @@ class BugReportService {
         Uri.parse('${ApiConstants.baseUrl}${ApiConstants.bugReportsEndpoint}/$bugId/toggle_status'),
         headers: headers,
       );
-
       if (response.statusCode != 200) {
-        throw Exception('Failed to toggle bug status: ${response.body}');
+        throw Exception('Failed to toggle bug status');
       }
-    } catch (e) {
-      throw Exception('Failed to connect to server: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error toggling bug status', error: e, stackTrace: stackTrace);
+      rethrow;
     }
   }
 
+  // Send reminder
   Future<void> sendReminder(int bugId) async {
     try {
       final headers = await _getAuthHeaders();
@@ -115,24 +114,25 @@ class BugReportService {
         Uri.parse('${ApiConstants.baseUrl}${ApiConstants.bugReportsEndpoint}/$bugId/send_reminder'),
         headers: headers,
       );
-
       if (response.statusCode != 200) {
-        throw Exception('Failed to send reminder: ${response.body}');
+        throw Exception('Failed to send reminder');
       }
-    } catch (e) {
-      throw Exception('Failed to connect to server: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error sending reminder', error: e, stackTrace: stackTrace);
+      rethrow;
     }
   }
 
-  Future<void> createBugReport(
-    String description,
-    String recipientId,
-    List<String> ccRecipients,
+  // Create bug report
+  Future<void> createBugReport({
+    required String description,
+    required String recipientId,
+    List<String> ccRecipients = const [],
     File? imageFile,
-    String severity,
+    String severity = 'low',
     String? projectId,
-    String? tabUrl
-  ) async {
+    String? tabUrl,
+  }) async {
     try {
       final token = await TokenStorage.getToken();
       final response = await http.post(
@@ -155,55 +155,13 @@ class BugReportService {
       if (response.statusCode != 201) {
         throw Exception('Failed to create bug report: ${response.body}');
       }
-    } catch (e) {
-      throw Exception('Failed to connect to server: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error creating bug report', error: e, stackTrace: stackTrace);
+      rethrow;
     }
   }
 
-  Future<List<Project>> fetchProjects() async {
-    try {
-      final headers = await _getAuthHeaders();
-      final response = await http.get(
-        Uri.parse('${ApiConstants.baseUrl}${ApiConstants.projectsEndpoint}'),
-        headers: headers,
-      );
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => Project.fromJson(json as Map<String, dynamic>)).toList();
-      } else {
-        throw Exception('Failed to load projects: ${response.body}');
-      }
-    } catch (e) {
-      print('Error fetching projects: $e');
-      throw Exception('Failed to connect to server: $e');
-    }
-  }
-
-  Future<List<User>> fetchUsers() async {
-    try {
-      final headers = await _getAuthHeaders();
-      final response = await http.get(
-        Uri.parse('${ApiConstants.baseUrl}${ApiConstants.allUsersEndpoint}'),
-        headers: headers,
-      );
-
-      print('Users API Response: ${response.body}');
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        final users = data.map((json) => User.fromJson(json)).toList();
-        print('Parsed Users: ${users.map((u) => '${u.name} (${u.id})')}');
-        return users;
-      } else {
-        throw Exception('Failed to load users: ${response.body}');
-      }
-    } catch (e) {
-      print('Error fetching users: $e');
-      throw Exception('Failed to connect to server: $e');
-    }
-  }
-
+  // Upload bug report with file
   Future<void> uploadBugReport({
     required String description,
     required List<User> availableUsers,
@@ -221,7 +179,7 @@ class BugReportService {
       dio.options.headers['Authorization'] = 'Bearer $token';
       
       final url = '${ApiConstants.baseUrl}/upload';
-      print('Attempting to upload to URL: $url');
+      _logger.info('Attempting to upload to URL: $url');
       
       // Get recipient name from available users
       final recipient = availableUsers.firstWhere(
@@ -238,10 +196,8 @@ class BugReportService {
         'tab_url': tabUrl,
       });
 
-      print('Form data fields: ${formData.fields}');
-
       if (imageFile != null) {
-        print('Adding image file: ${imageFile.path}');
+        _logger.info('Adding image file: ${imageFile.path}');
         formData.files.add(
           MapEntry(
             'file',
@@ -253,7 +209,7 @@ class BugReportService {
           ),
         );
       } else if (imageBytes != null) {
-        print('Adding image bytes');
+        _logger.info('Adding image bytes');
         formData.files.add(
           MapEntry(
             'file',
@@ -273,32 +229,31 @@ class BugReportService {
           validateStatus: (status) => status != null && (status >= 200 && status < 300),
           headers: {
             'Accept': '*/*',
-            'Content-Type': 'multipart/form-data',
           },
         ),
       );
 
-      print('Response status: ${response.statusCode}');
-      print('Response data: ${response.data}');
-
-      if (response.data['message'] == 'Upload successful' && response.data['id'] != null) {
-        return;
-      } else {
-        throw Exception('Failed to create bug report: ${response.data}');
+      if (response.data['message'] != 'Upload successful' || response.data['id'] == null) {
+        throw Exception('Failed to upload bug report: ${response.data}');
       }
-    } catch (e) {
-      print('Error uploading bug report: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error uploading bug report', error: e, stackTrace: stackTrace);
       if (e is DioException) {
-        print('Request that failed: ${e.requestOptions.uri}');
-        print('Request headers: ${e.requestOptions.headers}');
-        print('Request data: ${e.requestOptions.data}');
-        print('Response status: ${e.response?.statusCode}');
-        print('Response data: ${e.response?.data}');
+        _logger.error('DioError details:', 
+          error: {
+            'request': e.requestOptions.uri,
+            'headers': e.requestOptions.headers,
+            'data': e.requestOptions.data,
+            'response': e.response?.data,
+          },
+          stackTrace: stackTrace
+        );
       }
       rethrow;
     }
   }
 
+  // Get comments for a bug
   Future<List<Comment>> getBugComments(int bugId) async {
     try {
       final headers = await _getAuthHeaders();
@@ -307,105 +262,104 @@ class BugReportService {
         headers: headers,
       );
 
-      print('Comments response: ${response.body}');
-
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
         return data.map((json) => Comment.fromJson(json)).toList();
       } else {
-        throw Exception('Failed to load comments: ${response.body}');
+        throw Exception('Failed to load comments');
       }
-    } catch (e) {
-      print('Error getting comments: $e');
-      throw Exception('Failed to connect to server: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error getting comments', error: e, stackTrace: stackTrace);
+      rethrow;
     }
   }
 
+  // Add comment to a bug
   Future<void> addComment(int bugId, String comment) async {
     try {
       final headers = await _getAuthHeaders();
       final response = await http.post(
         Uri.parse('${ApiConstants.baseUrl}/bug_reports/$bugId/comments'),
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-        },
+        headers: headers,
         body: jsonEncode({
           'comment': comment,
         }),
       );
 
       if (response.statusCode != 200 && response.statusCode != 201) {
-        throw Exception('Failed to add comment: ${response.body}');
+        throw Exception('Failed to add comment');
       }
-    } catch (e) {
-      print('Error adding comment: $e');
-      throw Exception('Failed to connect to server: $e');
-    }
-  }
-
-  Future<void> deleteBugReport(int bugId) async {
-    try {
-      final token = await TokenStorage.getToken();
-      final dio = Dio();
-      dio.options.headers['Authorization'] = 'Bearer $token';
-      
-      final url = '${ApiConstants.baseUrl}/bug_reports/$bugId';
-      print('Attempting to delete bug report: $url');
-
-      final response = await dio.delete(
-        url,
-        options: Options(
-          validateStatus: (status) => status != null && (status >= 200 && status < 300),
-          headers: {
-            'Accept': '*/*',
-          },
-        ),
-      );
-
-      print('Response status: ${response.statusCode}');
-      print('Response data: ${response.data}');
-
-      if (response.statusCode != 200) {
-        throw Exception('Failed to delete bug report: ${response.data}');
-      }
-    } catch (e) {
-      print('Error deleting bug report: $e');
-      if (e is DioException) {
-        print('Request that failed: ${e.requestOptions.uri}');
-        print('Request headers: ${e.requestOptions.headers}');
-        print('Response status: ${e.response?.statusCode}');
-        print('Response data: ${e.response?.data}');
-      }
+    } catch (e, stackTrace) {
+      _logger.error('Error adding comment', error: e, stackTrace: stackTrace);
       rethrow;
     }
   }
 
-  Future<List<BugReport>> getCreatedBugReports(int userId) async {
+  // Delete bug report
+  Future<void> deleteBugReport(int bugId) async {
     try {
       final headers = await _getAuthHeaders();
-      final response = await http.get(
-        Uri.parse('${ApiConstants.baseUrl}/users/$userId/created_bug_reports'),
+      final response = await http.delete(
+        Uri.parse('${ApiConstants.baseUrl}/bug_reports/$bugId'),
         headers: headers,
       );
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => BugReport.fromJson(json)).toList();
-      } else {
-        throw Exception('Failed to load created bug reports: ${response.body}');
+      if (response.statusCode != 200) {
+        throw Exception('Failed to delete bug report');
       }
-    } catch (e) {
-      print('Error fetching created bug reports: $e');
-      throw Exception('Failed to connect to server: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error deleting bug report', error: e, stackTrace: stackTrace);
+      rethrow;
     }
   }
 
-  Future<List<BugReport>> getReceivedBugReports(int userId) async {
+  // Get projects
+  Future<List<Project>> fetchProjects() async {
     try {
       final headers = await _getAuthHeaders();
       final response = await http.get(
-        Uri.parse('${ApiConstants.baseUrl}/users/$userId/received_bug_reports'),
+        Uri.parse('${ApiConstants.baseUrl}${ApiConstants.projectsEndpoint}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((json) => Project.fromJson(json)).toList();
+      } else {
+        throw Exception('Failed to load projects');
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error fetching projects', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Get all users
+  Future<List<User>> fetchUsers() async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}${ApiConstants.allUsersEndpoint}'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((json) => User.fromJson(json)).toList();
+      } else {
+        throw Exception('Failed to load users');
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error fetching users', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Get all bug reports
+  Future<List<BugReport>> getAllBugReports() async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}${ApiConstants.bugReportsEndpoint}'),
         headers: headers,
       );
 
@@ -413,11 +367,16 @@ class BugReportService {
         final List<dynamic> data = json.decode(response.body);
         return data.map((json) => BugReport.fromJson(json)).toList();
       } else {
-        throw Exception('Failed to load received bug reports: ${response.body}');
+        throw Exception('Failed to load all bug reports');
       }
-    } catch (e) {
-      print('Error fetching received bug reports: $e');
-      throw Exception('Failed to connect to server: $e');
+    } catch (e, stackTrace) {
+      _logger.error('Error loading all bug reports', error: e, stackTrace: stackTrace);
+      rethrow;
     }
+  }
+
+  // Get received bug reports (alias for getAssignedBugReports for backward compatibility)
+  Future<List<BugReport>> getReceivedBugReports(int userId) async {
+    return getAssignedBugReports(userId);
   }
 } 

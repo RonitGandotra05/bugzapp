@@ -176,24 +176,44 @@ class _HomeScreenState extends State<HomeScreen> {
     // Then apply user filter
     switch (_currentBugFilter) {
       case BugFilter.createdByMe:
-        // Find current user from available users by email
+        // Find current user from available users by name or email
         final currentUser = _availableUsers.firstWhere(
-          (user) => user.email.toLowerCase() == '${_userName.toLowerCase()}@gmail.com',
-          orElse: () => User(id: 0, name: '', email: '', isAdmin: false),
+          (user) => user.name.toLowerCase() == 'Saurabh Mohapatra'.toLowerCase() ||
+                    user.email.toLowerCase() == 'saurabh@rechargezap.in'.toLowerCase(),
+          orElse: () {
+            print('Failed to find user in available users: ${_availableUsers.map((u) => "${u.name} (${u.id})")}');
+            return User(
+              id: 0,
+              name: '',
+              email: '',
+              phone: '',
+              isAdmin: false,
+            );
+          },
         );
         
-        print('Filtering by creator - Current user ID: ${currentUser.id}');
+        print('Filtering by creator - Current user: ${currentUser.name} (${currentUser.id})');
         filtered = filtered.where((bug) => bug.creator_id == currentUser.id).toList();
         break;
         
       case BugFilter.assignedToMe:
-        // Find current user from available users by email
+        // Find current user from available users by name or email
         final currentUser = _availableUsers.firstWhere(
-          (user) => user.email.toLowerCase() == '${_userName.toLowerCase()}@gmail.com',
-          orElse: () => User(id: 0, name: '', email: '', isAdmin: false),
+          (user) => user.name.toLowerCase() == 'Saurabh Mohapatra'.toLowerCase() ||
+                    user.email.toLowerCase() == 'saurabh@rechargezap.in'.toLowerCase(),
+          orElse: () {
+            print('Failed to find user in available users: ${_availableUsers.map((u) => "${u.name} (${u.id})")}');
+            return User(
+              id: 0,
+              name: '',
+              email: '',
+              phone: '',
+              isAdmin: false,
+            );
+          },
         );
         
-        print('Filtering by recipient - Current user ID: ${currentUser.id}');
+        print('Filtering by recipient - Current user: ${currentUser.name} (${currentUser.id})');
         filtered = filtered.where((bug) => bug.recipient_id == currentUser.id).toList();
         break;
         
@@ -204,7 +224,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     print('Current filter: $_currentBugFilter');
-    print('Current user email: ${_userName}@gmail.com');
     print('Available users: ${_availableUsers.map((u) => "${u.name} (${u.id})")}');
     print('Filtered bugs count: ${filtered.length}');
     if (filtered.isNotEmpty) {

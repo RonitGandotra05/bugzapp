@@ -1,8 +1,21 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'screens/splash_screen.dart';
+import 'providers/bug_report_provider.dart';
+import 'services/logging_service.dart';
 
 void main() {
-  runApp(const MyApp());
+  final logger = LoggingService();
+  logger.info('Starting BugZapp application');
+  
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => BugReportProvider()),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {

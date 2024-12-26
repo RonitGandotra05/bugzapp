@@ -4,43 +4,24 @@ class User {
   final int id;
   final String name;
   final String email;
+  final String phone;
   final bool isAdmin;
 
   User({
     required this.id,
     required this.name,
     required this.email,
-    this.isAdmin = false,
+    required this.phone,
+    required this.isAdmin,
   });
 
-  factory User.fromJson(dynamic json) {
-    if (json is String) {
-      // If we just get a name string
-      return User(
-        id: 0,  // Temporary ID
-        name: json,
-        email: '',
-        isAdmin: false,
-      );
-    }
-
-    final Map<String, dynamic> data = json is Map ? json : jsonDecode(json);
+  factory User.fromJson(Map<String, dynamic> json) {
     return User(
-      id: int.tryParse(data['id']?.toString() ?? '0') ?? 0,
-      name: data['name']?.toString() ?? '',
-      email: data['email']?.toString() ?? '',
-      isAdmin: data['is_admin'] == true,
+      id: json['id'] as int,
+      name: json['name'] as String,
+      email: json['email'] as String,
+      phone: json['phone'] as String,
+      isAdmin: json['is_admin'] as bool,
     );
   }
-
-  @override
-  String toString() => name;
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is User && runtimeType == other.runtimeType && id == other.id;
-
-  @override
-  int get hashCode => id.hashCode;
 } 
