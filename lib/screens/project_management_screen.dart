@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import '../services/bug_report_service.dart';
 import '../models/project.dart';
 import '../models/bug_report.dart';
@@ -534,13 +535,19 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
                                           onSendReminder: () async {
                                             try {
                                               final response = await _bugReportService.sendReminder(bug.id);
+                                              
+                                              // Get the timestamp from response
+                                              final timestamp = response['timestamp'] as String;
+                                              
+                                              // The backend sends time in "dd MMMM hh:mm a" format already in IST
+                                              // So we just need to display it as is
                                               ScaffoldMessenger.of(context).showSnackBar(
                                                 SnackBar(
                                                   content: Column(
                                                     mainAxisSize: MainAxisSize.min,
                                                     crossAxisAlignment: CrossAxisAlignment.start,
                                                     children: [
-                                                      Text('Reminder sent successfully'),
+                                                      Text('Reminder sent successfully at $timestamp'),
                                                       if (response['notifications_sent']?.isNotEmpty ?? false)
                                                         Text(
                                                           'Sent to: ${(response['notifications_sent'] as List).join(", ")}',

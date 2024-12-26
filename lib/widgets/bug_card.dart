@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import '../models/bug_report.dart';
 import '../models/comment.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -23,6 +24,24 @@ class BugCard extends StatelessWidget {
     required this.onSendReminder,
     required this.onDelete,
   }) : super(key: key);
+
+  String _formatToIST(DateTime utcTime) {
+    final istTime = utcTime.add(const Duration(hours: 5, minutes: 30));
+    return DateFormat("dd MMM yyyy, hh:mm a").format(istTime) + " IST";
+  }
+
+  String _getTimeDisplay(DateTime utcTime) {
+    final now = DateTime.now().toUtc();
+    final difference = now.difference(utcTime);
+
+    if (difference.inDays < 1) {
+      // If less than 24 hours, show relative time
+      return timeago.format(utcTime);
+    } else {
+      // Otherwise show formatted IST time
+      return _formatToIST(utcTime);
+    }
+  }
 
   void _showBugDetails(BuildContext context) {
     showDialog(
@@ -392,7 +411,7 @@ class BugCard extends StatelessWidget {
                         ),
                       ),
                       Text(
-                        timeago.format(bug.modifiedDate.toLocal()),
+                        _getTimeDisplay(bug.modifiedDate.toLocal()),
                         style: GoogleFonts.poppins(
                           color: Colors.grey[500],
                           fontSize: 11,
