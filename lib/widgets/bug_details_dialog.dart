@@ -52,7 +52,7 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      final comments = await widget.bugReportService.getBugComments(widget.bug.id);
+      final comments = await widget.bugReportService.getComments(widget.bug.id);
       if (mounted) {
         setState(() {
           _comments = comments;
@@ -61,9 +61,14 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          // Show error in UI if comments fail to load
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error loading comments: $e')),
+          );
+        });
       }
-      print('Error loading comments: $e');
     }
   }
 
@@ -89,9 +94,10 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
       _commentController.clear();
       await _loadComments();
     } catch (e) {
-      print('Error adding comment: $e');
-    } finally {
       if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error adding comment: $e')),
+        );
         setState(() => _isLoading = false);
       }
     }
@@ -244,16 +250,24 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
                           children: [
                             Text(
                               comment.userName,
-                              style: const TextStyle(fontWeight: FontWeight.bold),
+                              style: GoogleFonts.poppins(
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                             Text(
-                              _formatTimestamp(comment.createdAt),
-                              style: const TextStyle(color: Colors.grey),
+                              timeago.format(comment.createdAt),
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                color: Colors.grey,
+                              ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        Text(comment.comment),
+                        const SizedBox(height: 8),
+                        Text(
+                          comment.comment,
+                          style: GoogleFonts.poppins(),
+                        ),
                       ],
                     ),
                   ),

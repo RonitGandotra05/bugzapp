@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../models/bug_report.dart';
+import '../models/comment.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'image_preview.dart';
 import 'dart:typed_data';
 import '../services/image_proxy_service.dart';
 import '../services/bug_report_service.dart';
 import 'bug_details_dialog.dart';
+import 'comment_dialog.dart';
 
 class BugCard extends StatelessWidget {
   final BugReport bug;
@@ -30,6 +32,16 @@ class BugCard extends StatelessWidget {
         imageUrl: bug.imageUrl,
         mediaType: bug.mediaType,
         tabUrl: bug.tabUrl,
+        bugReportService: BugReportService(),
+      ),
+    );
+  }
+
+  void _showComments(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => CommentDialog(
+        bugId: bug.id,
         bugReportService: BugReportService(),
       ),
     );
@@ -262,6 +274,117 @@ class BugCard extends StatelessWidget {
                         ),
                       ),
                     ],
+                  ),
+
+                  // Comments section
+                  FutureBuilder<List<Comment>>(
+                    future: BugReportService().getComments(bug.id),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const SizedBox.shrink();  // Don't show loading indicator in card
+                      }
+                      
+                      if (snapshot.hasError) {
+                        return const SizedBox.shrink();  // Don't show error in card
+                      }
+
+                      final comments = snapshot.data ?? [];
+                      if (comments.isEmpty) {
+                        return const SizedBox.shrink();  // Don't show empty state
+                      }
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Divider(height: 24),
+                          Row(
+                            children: [
+                              Icon(Icons.comment_outlined, 
+                                size: 14, 
+                                color: Colors.grey[600]
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Comments (${comments.length})',
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 12,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          ...comments.map((comment) => Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                CircleAvatar(
+                                  radius: 12,
+                                  backgroundColor: Colors.grey[200],
+                                  child: Text(
+                                    comment.userName[0].toUpperCase(),
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Text(
+                                            comment.userName,
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w600,
+                                              color: Colors.grey[800],
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '•',
+                                            style: TextStyle(
+                                              color: Colors.grey[400],
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            timeago.format(comment.createdAt),
+                                            style: GoogleFonts.poppins(
+                                              fontSize: 10,
+                                              color: Colors.grey[500],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        comment.comment,
+                                        style: GoogleFonts.poppins(
+                                          fontSize: 11,
+                                          color: Colors.grey[700],
+                                          height: 1.4,
+                                        ),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )).toList(),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),

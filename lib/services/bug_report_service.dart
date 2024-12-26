@@ -107,18 +107,30 @@ class BugReportService {
   }
 
   // Send reminder
-  Future<void> sendReminder(int bugId) async {
+  Future<Map<String, dynamic>> sendReminder(int bugId) async {
     try {
       final headers = await _getAuthHeaders();
       final response = await http.post(
-        Uri.parse('${ApiConstants.baseUrl}${ApiConstants.bugReportsEndpoint}/$bugId/send_reminder'),
+        Uri.parse('${ApiConstants.baseUrl}/bug_reports/$bugId/send_reminder'),
         headers: headers,
       );
-      if (response.statusCode != 200) {
-        throw Exception('Failed to send reminder');
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        _logger.info('Reminder sent successfully for bug #$bugId');
+        _logger.info('Notifications sent to: ${responseData['notifications_sent']}');
+        
+        if (responseData['failed_notifications']?.isNotEmpty ?? false) {
+          _logger.warning('Some notifications failed: ${responseData['failed_notifications']}');
+        }
+        
+        return responseData;
+      } else {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to send reminder';
+        throw Exception(error);
       }
     } catch (e, stackTrace) {
-      _logger.error('Error sending reminder', error: e, stackTrace: stackTrace);
+      _logger.error('Error sending reminder for bug #$bugId', error: e, stackTrace: stackTrace);
       rethrow;
     }
   }
@@ -264,33 +276,14 @@ class BugReportService {
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
+        _logger.info('Retrieved ${data.length} comments for bug #$bugId');
         return data.map((json) => Comment.fromJson(json)).toList();
       } else {
-        throw Exception('Failed to load comments');
+        final error = json.decode(response.body)['detail'] ?? 'Failed to load comments';
+        throw Exception(error);
       }
     } catch (e, stackTrace) {
-      _logger.error('Error getting comments', error: e, stackTrace: stackTrace);
-      rethrow;
-    }
-  }
-
-  // Add comment to a bug
-  Future<void> addComment(int bugId, String comment) async {
-    try {
-      final headers = await _getAuthHeaders();
-      final response = await http.post(
-        Uri.parse('${ApiConstants.baseUrl}/bug_reports/$bugId/comments'),
-        headers: headers,
-        body: jsonEncode({
-          'comment': comment,
-        }),
-      );
-
-      if (response.statusCode != 200 && response.statusCode != 201) {
-        throw Exception('Failed to add comment');
-      }
-    } catch (e, stackTrace) {
-      _logger.error('Error adding comment', error: e, stackTrace: stackTrace);
+      _logger.error('Error getting comments for bug #$bugId', error: e, stackTrace: stackTrace);
       rethrow;
     }
   }
@@ -378,5 +371,78 @@ class BugReportService {
   // Get received bug reports (alias for getAssignedBugReports for backward compatibility)
   Future<List<BugReport>> getReceivedBugReports(int userId) async {
     return getAssignedBugReports(userId);
+  }
+
+  // Get image from S3
+  Future<Uint8List?> getImage(String imageName) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}/image/$imageName'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        return response.bodyBytes;
+      } else {
+        _logger.warning('Failed to load image $imageName: ${response.statusCode}');
+        return null;
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error loading image $imageName', error: e, stackTrace: stackTrace);
+      return null;
+    }
+  }
+
+  // Get comments for a bug report
+  Future<List<Comment>> getComments(int bugId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}/bug_reports/$bugId/comments'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        _logger.info('Retrieved ${data.length} comments for bug #$bugId');
+        return data.map((json) => Comment.fromJson(json)).toList();
+      } else {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to load comments';
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error getting comments for bug #$bugId', error: e, stackTrace: stackTrace);
+      return []; // Return empty list on error
+    }
+  }
+
+  // Add a comment to a bug report
+  Future<Comment> addComment(int bugId, String comment) async {
+    try {
+      _logger.info('Adding comment to bug #$bugId: $comment');
+      
+      final headers = await _getAuthHeaders();
+      final response = await http.post(
+        Uri.parse('${ApiConstants.baseUrl}/bug_reports/$bugId/comments'),
+        headers: headers,
+        body: json.encode({'comment': comment}),
+      );
+
+      _logger.info('Comment API response status: ${response.statusCode}');
+      _logger.info('Comment API response body: ${response.body}');
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return Comment.fromJson(data);
+      } else {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to add comment';
+        _logger.error('Failed to add comment: $error');
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error adding comment to bug #$bugId', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
   }
 } 

@@ -19,7 +19,17 @@ class Comment {
       bugReportId: json['bug_report_id'] as int,
       userName: json['user_name'] as String,
       comment: json['comment'] as String,
-      createdAt: DateTime.parse(json['created_at']),
+      createdAt: DateTime.parse(json['created_at'] as String),
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'bug_report_id': bugReportId,
+      'user_name': userName,
+      'comment': comment,
+      'created_at': createdAt.toIso8601String(),
+    };
   }
 } 
