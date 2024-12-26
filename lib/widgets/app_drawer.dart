@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../screens/user_management_screen.dart';
+import '../screens/project_management_screen.dart';
 
 class AppDrawer extends StatelessWidget {
   final bool isAdmin;
@@ -60,7 +61,7 @@ class AppDrawer extends StatelessWidget {
                 ],
               ),
             ),
-            if (isAdmin)
+            if (isAdmin) ...[
               ListTile(
                 leading: Icon(Icons.admin_panel_settings),
                 title: Text(
@@ -77,6 +78,23 @@ class AppDrawer extends StatelessWidget {
                   );
                 },
               ),
+              ListTile(
+                leading: Icon(Icons.folder_special),
+                title: Text(
+                  'Project Management',
+                  style: GoogleFonts.poppins(),
+                ),
+                onTap: () {
+                  Navigator.pop(context); // Close drawer
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ProjectManagementScreen(),
+                    ),
+                  );
+                },
+              ),
+            ],
             ListTile(
               leading: Icon(Icons.logout),
               title: Text(

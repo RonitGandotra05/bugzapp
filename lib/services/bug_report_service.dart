@@ -27,6 +27,11 @@ class BugReportService {
   static DateTime? _usersCacheTimestamp;
   static const usersCacheDuration = Duration(minutes: 5);
 
+  // Cache for projects
+  static List<Project>? _projectsCache;
+  static DateTime? _projectsCacheTimestamp;
+  static const projectsCacheDuration = Duration(minutes: 5);
+
   Future<Map<String, String>> _getAuthHeaders() async {
     final token = await TokenStorage.getToken();
     return {
@@ -312,22 +317,37 @@ class BugReportService {
 
   // Get projects
   Future<List<Project>> fetchProjects() async {
+    final now = DateTime.now();
+    
+    // Return cached projects if available and not expired
+    if (_projectsCache != null && 
+        _projectsCacheTimestamp != null && 
+        now.difference(_projectsCacheTimestamp!) < projectsCacheDuration) {
+      return _projectsCache!;
+    }
+
     try {
       final headers = await _getAuthHeaders();
       final response = await http.get(
-        Uri.parse('${ApiConstants.baseUrl}${ApiConstants.projectsEndpoint}'),
+        Uri.parse('${ApiConstants.baseUrl}/projects'),
         headers: headers,
       );
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => Project.fromJson(json)).toList();
+        final projects = data.map((json) => Project.fromJson(json)).toList();
+        
+        // Update cache
+        _projectsCache = projects;
+        _projectsCacheTimestamp = now;
+        
+        return projects;
       } else {
         throw Exception('Failed to load projects');
       }
     } catch (e, stackTrace) {
       _logger.error('Error fetching projects', error: e, stackTrace: stackTrace);
-      rethrow;
+      return _projectsCache ?? []; // Return cached projects on error if available
     }
   }
 
@@ -564,6 +584,123 @@ class BugReportService {
       }
     } catch (e, stackTrace) {
       _logger.error('Error deleting user', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Create project
+  Future<Project> createProject({
+    required String name,
+    required String description,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.post(
+        Uri.parse('${ApiConstants.baseUrl}/projects'),
+        headers: headers,
+        body: json.encode({
+          'name': name,
+          'description': description,
+        }),
+      );
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = json.decode(response.body);
+        final project = Project.fromJson(data);
+        
+        // Clear projects cache to force refresh
+        _projectsCache = null;
+        _projectsCacheTimestamp = null;
+        
+        return project;
+      } else {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to create project';
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error creating project', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Delete project
+  Future<void> deleteProject(int projectId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse('${ApiConstants.baseUrl}/projects/$projectId'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        // Clear projects cache to force refresh
+        _projectsCache = null;
+        _projectsCacheTimestamp = null;
+      } else {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to delete project';
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error deleting project', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Add bug report to project
+  Future<void> addBugReportToProject(int projectId, int bugId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.post(
+        Uri.parse('${ApiConstants.baseUrl}/projects/$projectId/bug_reports/$bugId'),
+        headers: headers,
+      );
+
+      if (response.statusCode != 200) {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to add bug report to project';
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error adding bug report to project', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Remove bug report from project
+  Future<void> removeBugReportFromProject(int projectId, int bugId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse('${ApiConstants.baseUrl}/projects/$projectId/bug_reports/$bugId'),
+        headers: headers,
+      );
+
+      if (response.statusCode != 200) {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to remove bug report from project';
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error removing bug report from project', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Get bug reports in project
+  Future<List<BugReport>> getBugReportsInProject(int projectId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.get(
+        Uri.parse('${ApiConstants.baseUrl}/projects/$projectId/bug_reports'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return data.map((json) => BugReport.fromJson(json)).toList();
+      } else {
+        throw Exception('Failed to load bug reports for project');
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error loading bug reports for project', error: e, stackTrace: stackTrace);
       rethrow;
     }
   }
