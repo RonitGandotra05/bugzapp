@@ -26,83 +26,41 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
   @override
   void initState() {
     super.initState();
-    _loadProjectsImmediately();
-  }
-
-  // Fast initial load of projects
-  Future<void> _loadProjectsImmediately() async {
-    try {
-      // First try to get cached projects for immediate display
-      final cachedProjects = await _bugReportService.fetchProjects(useCache: true);
-      if (mounted && cachedProjects.isNotEmpty) {
-        setState(() {
-          _projects = cachedProjects;
-          _isLoading = false;
-        });
-      }
-
-      // Then refresh from server in background
-      _loadProjects();
-    } catch (e) {
-      // If cache fails, load from server
-      _loadProjects();
-    }
+    _loadProjects();
   }
 
   Future<void> _loadProjects() async {
     try {
-      final projects = await _bugReportService.fetchProjects(useCache: false);
-      if (!mounted) return;
-      
+      final projects = await _bugReportService.fetchProjects();
       setState(() {
         _projects = projects;
         _isLoading = false;
       });
-
-      // Pre-fetch bug reports for each project in background
-      for (final project in projects) {
-        _bugReportService.getBugReportsInProject(project.id).then((bugReports) {
-          // Bug reports are now cached
-          // Pre-fetch comments for each bug report
-          for (final bug in bugReports) {
-            _bugReportService.getComments(bug.id).catchError((e) {
-              // Silently handle error as this is background loading
-              print('Error pre-fetching comments for bug #${bug.id}: $e');
-            });
-          }
-        }).catchError((e) {
-          // Silently handle error as this is background loading
-          print('Error pre-fetching bug reports for project #${project.id}: $e');
-        });
-      }
     } catch (e) {
-      if (!mounted) return;
-      
       setState(() {
         _isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading projects: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading projects: $e')),
+        );
+      }
     }
   }
 
   Future<void> _loadProjectBugReports(int projectId) async {
     try {
-      // First try to get cached bug reports for immediate display
-      final cachedReports = await _bugReportService.getBugReportsInProject(projectId, useCache: true);
-      if (mounted && cachedReports.isNotEmpty) {
-        setState(() {
-          _projectBugReports = _sortBugReports(cachedReports);
-        });
-      }
-
-      // Then load fresh data from server
-      final bugReports = await _bugReportService.getBugReportsInProject(projectId, useCache: false);
+      setState(() {
+        _isLoading = true;
+      });
+      
+      final bugReports = await _bugReportService.getBugReportsInProject(projectId);
+      
       if (!mounted) return;
       
       setState(() {
         _projectBugReports = _sortBugReports(bugReports);
+        _isLoading = false;
       });
 
       // Pre-fetch comments for each bug report in the background
@@ -115,11 +73,14 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
         });
       }
     } catch (e) {
-      if (!mounted) return;
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading bug reports: $e')),
-      );
+      setState(() {
+        _isLoading = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading bug reports: $e')),
+        );
+      }
     }
   }
 
