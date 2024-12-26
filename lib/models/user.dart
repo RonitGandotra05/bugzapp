@@ -21,7 +21,17 @@ class User {
       name: json['name'] as String,
       email: json['email'] as String,
       phone: json['phone'] as String,
-      isAdmin: json['is_admin'] as bool,
+      isAdmin: json['is_admin'] as bool? ?? false,
     );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'email': email,
+      'phone': phone,
+      'is_admin': isAdmin,
+    };
   }
 } 

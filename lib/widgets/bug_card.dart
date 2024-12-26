@@ -47,6 +47,131 @@ class BugCard extends StatelessWidget {
     );
   }
 
+  // Comments section
+  Widget _buildCommentsSection() {
+    return FutureBuilder<List<Comment>>(
+      future: BugReportService().getComments(bug.id),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const SizedBox.shrink();  // Don't show anything while loading
+        }
+
+        final comments = snapshot.data ?? [];
+        if (comments.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Divider(height: 24),
+            Row(
+              children: [
+                Icon(Icons.comment_outlined, 
+                  size: 14, 
+                  color: Colors.grey[600]
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'Comments (${comments.length})',
+                  style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    color: Colors.grey[700],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ...comments.take(2).map((comment) => Container(  // Only show latest 2 comments
+              margin: const EdgeInsets.only(bottom: 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  CircleAvatar(
+                    radius: 12,
+                    backgroundColor: Colors.grey[200],
+                    child: Text(
+                      comment.userName[0].toUpperCase(),
+                      style: GoogleFonts.poppins(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text(
+                              comment.userName,
+                              style: GoogleFonts.poppins(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.grey[800],
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              '•',
+                              style: TextStyle(
+                                color: Colors.grey[400],
+                                fontSize: 11,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              timeago.format(comment.createdAt),
+                              style: GoogleFonts.poppins(
+                                fontSize: 10,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          comment.comment,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: Colors.grey[700],
+                            height: 1.4,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            )).toList(),
+            if (comments.length > 2)  // Show "View all" if there are more comments
+              TextButton(
+                onPressed: () => _showBugDetails(context),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: Text(
+                  'View all ${comments.length} comments',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    color: Colors.blue[700],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
@@ -276,116 +401,8 @@ class BugCard extends StatelessWidget {
                     ],
                   ),
 
-                  // Comments section
-                  FutureBuilder<List<Comment>>(
-                    future: BugReportService().getComments(bug.id),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const SizedBox.shrink();  // Don't show loading indicator in card
-                      }
-                      
-                      if (snapshot.hasError) {
-                        return const SizedBox.shrink();  // Don't show error in card
-                      }
-
-                      final comments = snapshot.data ?? [];
-                      if (comments.isEmpty) {
-                        return const SizedBox.shrink();  // Don't show empty state
-                      }
-
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Divider(height: 24),
-                          Row(
-                            children: [
-                              Icon(Icons.comment_outlined, 
-                                size: 14, 
-                                color: Colors.grey[600]
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Comments (${comments.length})',
-                                style: GoogleFonts.poppins(
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 12,
-                                  color: Colors.grey[700],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          ...comments.map((comment) => Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                CircleAvatar(
-                                  radius: 12,
-                                  backgroundColor: Colors.grey[200],
-                                  child: Text(
-                                    comment.userName[0].toUpperCase(),
-                                    style: GoogleFonts.poppins(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.grey[700],
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Text(
-                                            comment.userName,
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 11,
-                                              fontWeight: FontWeight.w600,
-                                              color: Colors.grey[800],
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            '•',
-                                            style: TextStyle(
-                                              color: Colors.grey[400],
-                                              fontSize: 11,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            timeago.format(comment.createdAt),
-                                            style: GoogleFonts.poppins(
-                                              fontSize: 10,
-                                              color: Colors.grey[500],
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        comment.comment,
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 11,
-                                          color: Colors.grey[700],
-                                          height: 1.4,
-                                        ),
-                                        maxLines: 2,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )).toList(),
-                        ],
-                      );
-                    },
-                  ),
+                  // Add comments section at the end
+                  _buildCommentsSection(),
                 ],
               ),
             ),

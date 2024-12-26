@@ -6,6 +6,7 @@ import '../models/bug_report.dart';
 import '../services/bug_report_service.dart';
 import '../utils/token_storage.dart';
 import '../widgets/bug_card.dart';
+import '../widgets/app_drawer.dart';
 import 'login_screen.dart';
 import '../models/bug_filter.dart';
 import '../widgets/bug_filter_dialog.dart';
@@ -44,6 +45,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   final BugReportService _bugReportService = BugReportService();
+  User? _currentUser;
   String _userName = '';
   bool _isLoading = false;
   List<BugReport> _bugReports = [];
@@ -63,6 +65,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     _loadData();
     _loadUserName();
+    _loadCurrentUser();
   }
 
   @override
@@ -163,6 +166,17 @@ class _HomeScreenState extends State<HomeScreen> {
       _loadData(); // Reload data with correct user ID
     } catch (e) {
       print('Error fetching user ID: $e');
+    }
+  }
+
+  Future<void> _loadCurrentUser() async {
+    try {
+      final user = await _bugReportService.getCurrentUser();
+      setState(() {
+        _currentUser = user;
+      });
+    } catch (e) {
+      print('Error loading current user: $e');
     }
   }
 
@@ -344,74 +358,9 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 48),
         ],
       ),
-      drawer: Drawer(
-        child: ListView(
-          children: [
-            DrawerHeader(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    const Color(0xFF9575CD),
-                    const Color(0xFF7E57C2),
-                    const Color(0xFF673AB7),
-                  ],
-                ),
-              ),
-              child: ShaderMask(
-                shaderCallback: (Rect bounds) {
-                  return LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      Colors.white.withOpacity(0.15),
-                      Colors.white.withOpacity(0.05),
-                      Colors.white.withOpacity(0.15),
-                    ],
-                    stops: const [0.0, 0.5, 1.0],
-                    transform: GradientRotation(pi / 4),
-                  ).createShader(bounds);
-                },
-                blendMode: BlendMode.srcOver,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    const CircleAvatar(
-                      backgroundColor: Colors.white,
-                      radius: 30,
-                      child: Icon(Icons.person, size: 36, color: Color(0xFF673AB7)),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      _userName.capitalize(),
-                      style: GoogleFonts.poppins(
-                        color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.logout, color: Colors.red),
-              title: Text(
-                'Logout',
-                style: GoogleFonts.poppins(
-                  color: Colors.red,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _handleLogout();
-              },
-            ),
-          ],
-        ),
+      drawer: AppDrawer(
+        isAdmin: _currentUser?.isAdmin ?? false,
+        onLogout: _handleLogout,
       ),
       body: Container(
         decoration: BoxDecoration(

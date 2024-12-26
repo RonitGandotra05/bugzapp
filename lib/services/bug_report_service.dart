@@ -15,12 +15,17 @@ import '../services/logging_service.dart';
 class BugReportService {
   final LoggingService _logger = LoggingService();
   
-  // Add enum for severity levels
-  static const Map<String, String> severityDisplayMap = {
-    'high': 'High',
-    'medium': 'Medium', 
-    'low': 'Low'
-  };
+  // Cache for comments
+  static final Map<int, List<Comment>> _commentsCache = {};
+  static final Map<int, DateTime> _commentsCacheTimestamp = {};
+  
+  // Cache duration (5 minutes)
+  static const cacheDuration = Duration(minutes: 5);
+
+  // Cache for users
+  static List<User>? _usersCache;
+  static DateTime? _usersCacheTimestamp;
+  static const usersCacheDuration = Duration(minutes: 5);
 
   Future<Map<String, String>> _getAuthHeaders() async {
     final token = await TokenStorage.getToken();
@@ -326,8 +331,17 @@ class BugReportService {
     }
   }
 
-  // Get all users
+  // Get all users with caching
   Future<List<User>> fetchUsers() async {
+    final now = DateTime.now();
+    
+    // Return cached users if available and not expired
+    if (_usersCache != null && 
+        _usersCacheTimestamp != null && 
+        now.difference(_usersCacheTimestamp!) < usersCacheDuration) {
+      return _usersCache!;
+    }
+
     try {
       final headers = await _getAuthHeaders();
       final response = await http.get(
@@ -337,13 +351,19 @@ class BugReportService {
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-        return data.map((json) => User.fromJson(json)).toList();
+        final users = data.map((json) => User.fromJson(json)).toList();
+        
+        // Update cache
+        _usersCache = users;
+        _usersCacheTimestamp = now;
+        
+        return users;
       } else {
         throw Exception('Failed to load users');
       }
     } catch (e, stackTrace) {
       _logger.error('Error fetching users', error: e, stackTrace: stackTrace);
-      rethrow;
+      return _usersCache ?? []; // Return cached users on error if available
     }
   }
 
@@ -396,6 +416,17 @@ class BugReportService {
 
   // Get comments for a bug report
   Future<List<Comment>> getComments(int bugId) async {
+    // Check cache first
+    final cachedComments = _commentsCache[bugId];
+    final cachedTimestamp = _commentsCacheTimestamp[bugId];
+    final now = DateTime.now();
+
+    if (cachedComments != null && 
+        cachedTimestamp != null && 
+        now.difference(cachedTimestamp) < cacheDuration) {
+      return cachedComments;
+    }
+
     try {
       final headers = await _getAuthHeaders();
       final response = await http.get(
@@ -405,15 +436,20 @@ class BugReportService {
 
       if (response.statusCode == 200) {
         final List<dynamic> data = json.decode(response.body);
-        _logger.info('Retrieved ${data.length} comments for bug #$bugId');
-        return data.map((json) => Comment.fromJson(json)).toList();
+        final comments = data.map((json) => Comment.fromJson(json)).toList();
+        
+        // Update cache
+        _commentsCache[bugId] = comments;
+        _commentsCacheTimestamp[bugId] = now;
+        
+        return comments;
       } else {
         final error = json.decode(response.body)['detail'] ?? 'Failed to load comments';
         throw Exception(error);
       }
     } catch (e, stackTrace) {
       _logger.error('Error getting comments for bug #$bugId', error: e, stackTrace: stackTrace);
-      return []; // Return empty list on error
+      return _commentsCache[bugId] ?? []; // Return cached comments on error if available
     }
   }
 
@@ -429,19 +465,105 @@ class BugReportService {
         body: json.encode({'comment': comment}),
       );
 
-      _logger.info('Comment API response status: ${response.statusCode}');
-      _logger.info('Comment API response body: ${response.body}');
-
       if (response.statusCode == 201 || response.statusCode == 200) {
         final data = json.decode(response.body);
-        return Comment.fromJson(data);
+        final newComment = Comment.fromJson(data);
+        
+        // Update cache
+        _commentsCache[bugId] = [...(_commentsCache[bugId] ?? []), newComment];
+        _commentsCacheTimestamp[bugId] = DateTime.now();
+        
+        return newComment;
       } else {
         final error = json.decode(response.body)['detail'] ?? 'Failed to add comment';
-        _logger.error('Failed to add comment: $error');
         throw Exception(error);
       }
     } catch (e, stackTrace) {
       _logger.error('Error adding comment to bug #$bugId', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Clear cache for a specific bug
+  void clearCommentsCache(int bugId) {
+    _commentsCache.remove(bugId);
+    _commentsCacheTimestamp.remove(bugId);
+  }
+
+  // Clear all cache
+  void clearAllCache() {
+    _commentsCache.clear();
+    _commentsCacheTimestamp.clear();
+  }
+
+  // Add user registration
+  Future<void> registerUser({
+    required String name,
+    required String email,
+    required String phone,
+    required String password,
+  }) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.post(
+        Uri.parse('${ApiConstants.baseUrl}/users/register'),
+        headers: headers,
+        body: json.encode({
+          'name': name,
+          'email': email,
+          'phone': phone,
+          'password': password,
+        }),
+      );
+
+      if (response.statusCode != 201) {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to register user';
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error registering user', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Toggle admin status
+  Future<void> toggleAdminStatus(int userId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.put(
+        Uri.parse('${ApiConstants.baseUrl}/users/$userId/toggle_admin'),
+        headers: headers,
+      );
+
+      if (response.statusCode != 200) {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to toggle admin status';
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error toggling admin status', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
+  }
+
+  // Delete user
+  Future<void> deleteUser(int userId) async {
+    try {
+      final headers = await _getAuthHeaders();
+      final response = await http.delete(
+        Uri.parse('${ApiConstants.baseUrl}/users/$userId'),
+        headers: headers,
+      );
+
+      if (response.statusCode == 200) {
+        // Clear users cache to force refresh
+        _usersCache = null;
+        _usersCacheTimestamp = null;
+      } else {
+        final error = json.decode(response.body)['detail'] ?? 'Failed to delete user';
+        throw Exception(error);
+      }
+    } catch (e, stackTrace) {
+      _logger.error('Error deleting user', error: e, stackTrace: stackTrace);
       rethrow;
     }
   }
