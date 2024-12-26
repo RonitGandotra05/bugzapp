@@ -11,10 +11,10 @@ import '../services/bug_report_service.dart';
 import 'bug_details_dialog.dart';
 import 'comment_dialog.dart';
 
-class BugCard extends StatelessWidget {
+class BugCard extends StatefulWidget {
   final BugReport bug;
+  final Future<void> Function() onSendReminder;
   final VoidCallback onStatusToggle;
-  final VoidCallback onSendReminder;
   final Function() onDelete;
 
   const BugCard({
@@ -24,6 +24,13 @@ class BugCard extends StatelessWidget {
     required this.onSendReminder,
     required this.onDelete,
   }) : super(key: key);
+
+  @override
+  State<BugCard> createState() => _BugCardState();
+}
+
+class _BugCardState extends State<BugCard> {
+  bool _isLoading = false;
 
   String _formatToIST(DateTime utcTime) {
     final istTime = utcTime.add(const Duration(hours: 5, minutes: 30));
@@ -47,10 +54,10 @@ class BugCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => BugDetailsDialog(
-        bug: bug,
-        imageUrl: bug.imageUrl,
-        mediaType: bug.mediaType,
-        tabUrl: bug.tabUrl,
+        bug: widget.bug,
+        imageUrl: widget.bug.imageUrl,
+        mediaType: widget.bug.mediaType,
+        tabUrl: widget.bug.tabUrl,
         bugReportService: BugReportService(),
       ),
     );
@@ -60,7 +67,7 @@ class BugCard extends StatelessWidget {
     showDialog(
       context: context,
       builder: (context) => CommentDialog(
-        bugId: bug.id,
+        bugId: widget.bug.id,
         bugReportService: BugReportService(),
       ),
     );
@@ -69,7 +76,7 @@ class BugCard extends StatelessWidget {
   // Comments section
   Widget _buildCommentsSection() {
     return FutureBuilder<List<Comment>>(
-      future: BugReportService().getComments(bug.id),
+      future: BugReportService().getComments(widget.bug.id),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const SizedBox.shrink();  // Don't show anything while loading
@@ -217,212 +224,234 @@ class BugCard extends StatelessWidget {
       ],
     );
 
-    return Center(
-      child: Container(
-        width: cardWidth,
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
-          gradient: bug.status == BugStatus.assigned ? assignedGradient : resolvedGradient,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: bug.status == BugStatus.assigned 
-                ? const Color(0xFFFF1744).withOpacity(0.3)  // Red border
-                : const Color(0xFF00C853).withOpacity(0.3), // Green border
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: (bug.status == BugStatus.assigned 
-                  ? const Color(0xFFFF1744) 
-                  : const Color(0xFF00C853)).withOpacity(0.1),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: () => _showBugDetails(context),
+    return StatefulBuilder(
+      builder: (context, setState) => Center(
+        child: Container(
+          width: cardWidth,
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            gradient: widget.bug.status == BugStatus.assigned ? assignedGradient : resolvedGradient,
             borderRadius: BorderRadius.circular(20),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Header with Status and Actions
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      // Status Chips
-                      Row(
-                        children: [
-                          _buildStatusChip(
-                            text: bug.severityText,
-                            color: bug.severityColor,
-                          ),
-                          const SizedBox(width: 8),
-                          _buildStatusChip(
-                            text: bug.statusText,
-                            color: bug.status == BugStatus.resolved
-                                ? Colors.green
-                                : Colors.orange,
-                          ),
-                        ],
-                      ),
-                      // Actions
-                      Row(
-                        children: [
-                          if (bug.status == BugStatus.assigned)
-                            IconButton(
-                              icon: const Icon(Icons.notifications_none, size: 20),
-                              onPressed: onSendReminder,
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              color: Colors.blue,
-                            ),
-                          PopupMenuButton<String>(
-                            itemBuilder: (context) => [
-                              // Add resolve/unresolve option
-                              PopupMenuItem(
-                                value: 'toggle_status',
-                                child: ListTile(
-                                  leading: Icon(
-                                    bug.status == BugStatus.resolved
-                                        ? Icons.refresh
-                                        : Icons.check_circle_outline,
-                                    color: bug.status == BugStatus.resolved
-                                        ? Colors.orange
-                                        : Colors.green,
-                                  ),
-                                  title: Text(
-                                    bug.status == BugStatus.resolved
-                                        ? 'Mark as Pending'
-                                        : 'Mark as Resolved',
-                                  ),
-                                ),
-                              ),
-                              // Delete option (for both assigned and resolved bugs)
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: ListTile(
-                                  leading: Icon(Icons.delete, color: Colors.red),
-                                  title: Text('Delete'),
-                                ),
-                              ),
-                            ],
-                            onSelected: (value) {
-                              if (value == 'delete') {
-                                // Show confirmation dialog
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: Text('Delete Bug Report'),
-                                    content: Text(
-                                      bug.status == BugStatus.resolved
-                                          ? 'Are you sure you want to delete this resolved bug report?'
-                                          : 'Are you sure you want to delete this bug report?'
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: Text('Cancel'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () {
-                                          Navigator.pop(context);
-                                          onDelete();
-                                        },
-                                        child: Text('Delete', style: TextStyle(color: Colors.red)),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              } else if (value == 'toggle_status') {
-                                onStatusToggle();
-                              }
-                            },
-                            icon: Icon(
-                              Icons.more_vert,
-                              color: Colors.grey[600],
-                              size: 20,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Description
-                  Text(
-                    bug.description,
-                    style: GoogleFonts.poppins(
-                      fontSize: 13,
-                      color: Colors.black87,
-                      height: 1.3,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 12),
-
-                  // Image if available
-                  if (bug.imageUrl != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        bug.imageUrl!,
-                        height: 120,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Container(),
-                      ),
-                    ),
-
-                  const SizedBox(height: 12),
-
-                  // Footer
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+            border: Border.all(
+              color: widget.bug.status == BugStatus.assigned 
+                  ? const Color(0xFFFF1744).withOpacity(0.3)  // Red border
+                  : const Color(0xFF00C853).withOpacity(0.3), // Green border
+              width: 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: (widget.bug.status == BugStatus.assigned 
+                    ? const Color(0xFFFF1744) 
+                    : const Color(0xFF00C853)).withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () => _showBugDetails(context),
+              borderRadius: BorderRadius.circular(20),
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header with Status and Actions
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        // Status Chips
+                        Row(
                           children: [
-                            if (bug.projectName != null)
-                              Text(
-                                bug.projectName!,
-                                style: GoogleFonts.poppins(
-                                  color: Colors.grey[700],
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                            _buildStatusChip(
+                              text: widget.bug.severityText,
+                              color: widget.bug.severityColor,
+                            ),
+                            const SizedBox(width: 8),
+                            _buildStatusChip(
+                              text: widget.bug.statusText,
+                              color: widget.bug.status == BugStatus.resolved
+                                  ? Colors.green
+                                  : Colors.orange,
+                            ),
+                          ],
+                        ),
+                        // Actions
+                        Row(
+                          children: [
+                            if (widget.bug.status == BugStatus.assigned)
+                              IconButton(
+                                icon: _isLoading 
+                                  ? SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                                      ),
+                                    )
+                                  : const Icon(Icons.notifications_none, size: 20),
+                                onPressed: _isLoading 
+                                  ? null 
+                                  : () async {
+                                      setState(() => _isLoading = true);
+                                      try {
+                                        await widget.onSendReminder();
+                                      } finally {
+                                        if (mounted) {
+                                          setState(() => _isLoading = false);
+                                        }
+                                      }
+                                    },
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(),
+                                color: Colors.blue,
                               ),
-                            Text(
-                              'Assigned to: ${bug.recipient}',
-                              style: GoogleFonts.poppins(
+                            PopupMenuButton<String>(
+                              itemBuilder: (context) => [
+                                // Add resolve/unresolve option
+                                PopupMenuItem(
+                                  value: 'toggle_status',
+                                  child: ListTile(
+                                    leading: Icon(
+                                      widget.bug.status == BugStatus.resolved
+                                          ? Icons.refresh
+                                          : Icons.check_circle_outline,
+                                      color: widget.bug.status == BugStatus.resolved
+                                          ? Colors.orange
+                                          : Colors.green,
+                                    ),
+                                    title: Text(
+                                      widget.bug.status == BugStatus.resolved
+                                          ? 'Mark as Pending'
+                                          : 'Mark as Resolved',
+                                    ),
+                                  ),
+                                ),
+                                // Delete option (for both assigned and resolved bugs)
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: ListTile(
+                                    leading: Icon(Icons.delete, color: Colors.red),
+                                    title: Text('Delete'),
+                                  ),
+                                ),
+                              ],
+                              onSelected: (value) {
+                                if (value == 'delete') {
+                                  // Show confirmation dialog
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: Text('Delete Bug Report'),
+                                      content: Text(
+                                        widget.bug.status == BugStatus.resolved
+                                            ? 'Are you sure you want to delete this resolved bug report?'
+                                            : 'Are you sure you want to delete this bug report?'
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(context),
+                                          child: Text('Cancel'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.pop(context);
+                                            widget.onDelete();
+                                          },
+                                          child: Text('Delete', style: TextStyle(color: Colors.red)),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                } else if (value == 'toggle_status') {
+                                  widget.onStatusToggle();
+                                }
+                              },
+                              icon: Icon(
+                                Icons.more_vert,
                                 color: Colors.grey[600],
-                                fontSize: 11,
+                                size: 20,
                               ),
                             ),
                           ],
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Description
+                    Text(
+                      widget.bug.description,
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        color: Colors.black87,
+                        height: 1.3,
                       ),
-                      Text(
-                        _getTimeDisplay(bug.modifiedDate.toLocal()),
-                        style: GoogleFonts.poppins(
-                          color: Colors.grey[500],
-                          fontSize: 11,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Image if available
+                    if (widget.bug.imageUrl != null)
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(
+                          widget.bug.imageUrl!,
+                          height: 120,
+                          width: double.infinity,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => Container(),
                         ),
                       ),
-                    ],
-                  ),
 
-                  // Add comments section at the end
-                  _buildCommentsSection(),
-                ],
+                    const SizedBox(height: 12),
+
+                    // Footer
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (widget.bug.projectName != null)
+                                Text(
+                                  widget.bug.projectName!,
+                                  style: GoogleFonts.poppins(
+                                    color: Colors.grey[700],
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              Text(
+                                'Assigned to: ${widget.bug.recipient}',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.grey[600],
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Text(
+                          _getTimeDisplay(widget.bug.modifiedDate.toLocal()),
+                          style: GoogleFonts.poppins(
+                            color: Colors.grey[500],
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    // Add comments section at the end
+                    _buildCommentsSection(),
+                  ],
+                ),
               ),
             ),
           ),

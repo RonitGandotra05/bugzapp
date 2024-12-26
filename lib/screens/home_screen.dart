@@ -92,15 +92,13 @@ class _HomeScreenState extends State<HomeScreen> {
             break;
           case BugFilter.assignedToMe:
             print('Fetching assigned bugs for user: $_currentUserId');
-            reports = await _bugReportService.getReceivedBugReports(_currentUserId!);
+            reports = await _bugReportService.getAssignedBugReports(_currentUserId!);
             break;
           case BugFilter.all:
           default:
             reports = await _bugReportService.getAllBugReports();
             break;
         }
-      } else {
-        reports = await _bugReportService.getAllBugReports();
       }
 
       if (mounted) {
@@ -114,9 +112,6 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       print('Error loading data: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e')),
-        );
         setState(() => _isLoading = false);
       }
     }
@@ -172,9 +167,15 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadCurrentUser() async {
     try {
       final user = await _bugReportService.getCurrentUser();
-      setState(() {
-        _currentUser = user;
-      });
+      if (mounted) {
+        setState(() {
+          _currentUser = user;
+          _currentUserId = user.id;
+          _userName = user.name;
+        });
+        // After setting current user, reload the data to apply filters
+        _loadData();
+      }
     } catch (e) {
       print('Error loading current user: $e');
     }
@@ -197,46 +198,20 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     
     // Then apply user filter
-    switch (_currentBugFilter) {
-      case BugFilter.createdByMe:
-        final currentUser = _availableUsers.firstWhere(
-          (user) => user.name.toLowerCase() == 'Saurabh Mohapatra'.toLowerCase() ||
-                    user.email.toLowerCase() == 'saurabh@rechargezap.in'.toLowerCase(),
-          orElse: () {
-            print('Failed to find user in available users: ${_availableUsers.map((u) => "${u.name} (${u.id})")}');
-            return User(
-              id: 0,
-              name: '',
-              email: '',
-              phone: '',
-              isAdmin: false,
-            );
-          },
-        );
-        filtered = filtered.where((bug) => bug.creator_id == currentUser.id).toList();
-        break;
-        
-      case BugFilter.assignedToMe:
-        final currentUser = _availableUsers.firstWhere(
-          (user) => user.name.toLowerCase() == 'Saurabh Mohapatra'.toLowerCase() ||
-                    user.email.toLowerCase() == 'saurabh@rechargezap.in'.toLowerCase(),
-          orElse: () {
-            print('Failed to find user in available users: ${_availableUsers.map((u) => "${u.name} (${u.id})")}');
-            return User(
-              id: 0,
-              name: '',
-              email: '',
-              phone: '',
-              isAdmin: false,
-            );
-          },
-        );
-        filtered = filtered.where((bug) => bug.recipient_id == currentUser.id).toList();
-        break;
-        
-      case BugFilter.all:
-      default:
-        break;
+    if (_currentUserId != null) {
+      switch (_currentBugFilter) {
+        case BugFilter.createdByMe:
+          filtered = filtered.where((bug) => bug.creator_id == _currentUserId).toList();
+          break;
+          
+        case BugFilter.assignedToMe:
+          filtered = filtered.where((bug) => bug.recipient_id == _currentUserId).toList();
+          break;
+          
+        case BugFilter.all:
+        default:
+          break;
+      }
     }
 
     // Apply search filter if search query exists
@@ -260,10 +235,17 @@ class _HomeScreenState extends State<HomeScreen> {
       : b.modifiedDate.compareTo(a.modifiedDate));
   }
 
-  void _handleFilterChange(BugFilterType filter) {
+  void _handleStatusFilterChange(BugFilterType filter) {
     setState(() {
       _currentFilter = filter;
     });
+  }
+
+  void _handleUserFilterChange(BugFilter filter) {
+    setState(() {
+      _currentBugFilter = filter;
+    });
+    _loadData(); // Reload data with new filter
   }
 
   void _toggleSortOrder() {
@@ -285,13 +267,6 @@ class _HomeScreenState extends State<HomeScreen> {
         SnackBar(content: Text('Error deleting bug report: $e')),
       );
     }
-  }
-
-  void _handleBugFilterChange(BugFilter filter) {
-    setState(() {
-      _currentBugFilter = filter;
-      _loadData();
-    });
   }
 
   Future<void> _sendReminder(int bugId) async {
@@ -383,7 +358,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 totalBugs: _bugReports.length,
                 resolvedBugs: _bugReports.where((bug) => bug.status == BugStatus.resolved).length,
                 pendingBugs: _bugReports.where((bug) => bug.status == BugStatus.assigned).length,
-                onFilterChange: _handleFilterChange,
+                onFilterChange: _handleStatusFilterChange,
                 currentFilter: _currentFilter,
               ),
             ),
@@ -438,7 +413,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           initialValue: _currentBugFilter,
                           onSelected: (BugFilter filter) {
-                            _handleBugFilterChange(filter);
+                            _handleUserFilterChange(filter);
                           },
                           itemBuilder: (BuildContext context) => [
                             PopupMenuItem(

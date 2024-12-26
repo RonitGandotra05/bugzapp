@@ -20,6 +20,7 @@ class _CommentDialogState extends State<CommentDialog> {
   final TextEditingController _commentController = TextEditingController();
   List<Comment> _comments = [];
   bool _isLoading = true;
+  bool _isSubmitting = false;
   String? _error;
 
   @override
@@ -48,22 +49,25 @@ class _CommentDialogState extends State<CommentDialog> {
     }
   }
 
-  Future<void> _addComment() async {
-    if (_commentController.text.trim().isEmpty) return;
+  Future<void> _submitComment() async {
+    if (_commentController.text.trim().isEmpty || _isSubmitting) return;
 
+    setState(() => _isSubmitting = true);
     try {
-      setState(() => _isLoading = true);
-      await widget.bugReportService.addComment(
+      final newComment = await widget.bugReportService.addComment(
         widget.bugId,
         _commentController.text.trim(),
       );
-      _commentController.clear();
-      await _loadComments();
-    } catch (e) {
       setState(() {
-        _error = 'Failed to add comment: ${e.toString()}';
-        _isLoading = false;
+        _comments = [..._comments, newComment];
+        _commentController.clear();
       });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error adding comment: $e')),
+      );
+    } finally {
+      setState(() => _isSubmitting = false);
     }
   }
 
@@ -124,17 +128,30 @@ class _CommentDialogState extends State<CommentDialog> {
                 Expanded(
                   child: TextField(
                     controller: _commentController,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Add a comment...',
-                      border: OutlineInputBorder(),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    maxLines: 3,
+                    maxLines: null,
+                    enabled: !_isSubmitting,
                   ),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
-                  icon: const Icon(Icons.send),
-                  onPressed: _addComment,
+                  icon: _isSubmitting
+                    ? SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                        ),
+                      )
+                    : const Icon(Icons.send),
+                  onPressed: _isSubmitting ? null : _submitComment,
+                  color: Colors.blue,
                 ),
               ],
             ),

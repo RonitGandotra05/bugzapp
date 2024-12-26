@@ -51,7 +51,7 @@ class BugReport {
       creator_id: json['creator_id'] as int?,
       recipient_id: json['recipient_id'] as int?,
       projectName: json['project_name'] as String?,
-      modifiedDate: DateTime.parse(json['modified_date'] as String),
+      modifiedDate: DateTime.parse(json['modified_date']),
       status: _parseStatus(json['status'] as String),
       severity: _parseSeverity(json['severity'] as String),
       imageUrl: json['image_url'] as String?,
@@ -61,17 +61,27 @@ class BugReport {
   }
 
   static BugStatus _parseStatus(String status) {
-    return BugStatus.values.firstWhere(
-      (e) => e.toString().split('.').last.toLowerCase() == status.toLowerCase(),
-      orElse: () => BugStatus.assigned,
-    );
+    switch (status.toLowerCase()) {
+      case 'assigned':
+        return BugStatus.assigned;
+      case 'resolved':
+        return BugStatus.resolved;
+      default:
+        return BugStatus.assigned;
+    }
   }
 
   static SeverityLevel _parseSeverity(String severity) {
-    return SeverityLevel.values.firstWhere(
-      (e) => e.toString().split('.').last.toLowerCase() == severity.toLowerCase(),
-      orElse: () => SeverityLevel.low,
-    );
+    switch (severity.toLowerCase()) {
+      case 'high':
+        return SeverityLevel.high;
+      case 'medium':
+        return SeverityLevel.medium;
+      case 'low':
+        return SeverityLevel.low;
+      default:
+        return SeverityLevel.low;
+    }
   }
 
   String get severityText {
