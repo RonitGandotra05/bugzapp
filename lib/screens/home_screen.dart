@@ -71,6 +71,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _tabUrl;
   List<User> _availableUsers = [];
   List<Project> _availableProjects = [];
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -1062,64 +1063,87 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       const SizedBox(width: 16),
                       Expanded(
-                        child: ElevatedButton(
-                          onPressed: () async {
-                            if (_formKey.currentState?.validate() ?? false) {
-                              _formKey.currentState?.save();
-                              
-                              if (_selectedRecipient == null) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Please select a recipient')),
-                                );
-                                return;
-                              }
-
-                              try {
-                                print('Selected recipient: ${_selectedRecipient?.id}');
+                        child: StatefulBuilder(
+                          builder: (context, setSubmitState) => ElevatedButton(
+                            onPressed: _isSubmitting ? null : () async {
+                              if (_formKey.currentState?.validate() ?? false) {
+                                _formKey.currentState?.save();
                                 
-                                await _bugReportService.uploadBugReport(
-                                  description: _description!,
-                                  recipientId: _selectedRecipient!.id.toString(),
-                                  ccRecipients: _selectedCCRecipients.map((user) => user.name).toList(),
-                                  imageFile: _selectedFile,
-                                  imageBytes: _webImageBytes,
-                                  severity: _selectedSeverity,
-                                  projectId: _selectedProject?.id.toString(),
-                                  tabUrl: _tabUrl,
-                                );
-                                
-                                if (mounted) {
-                                  Navigator.pop(context);
+                                if (_selectedRecipient == null) {
                                   ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Bug report created successfully')),
+                                    const SnackBar(content: Text('Please select a recipient')),
                                   );
-                                  _loadData();
+                                  return;
                                 }
-                              } catch (e) {
-                                print('Error creating bug report: $e');
+
+                                setSubmitState(() {
+                                  _isSubmitting = true;
+                                });
+
+                                try {
+                                  print('Selected recipient: ${_selectedRecipient?.id}');
+                                  
+                                  await _bugReportService.uploadBugReport(
+                                    description: _description!,
+                                    recipientId: _selectedRecipient!.id.toString(),
+                                    ccRecipients: _selectedCCRecipients.map((user) => user.name).toList(),
+                                    imageFile: _selectedFile,
+                                    imageBytes: _webImageBytes,
+                                    severity: _selectedSeverity,
+                                    projectId: _selectedProject?.id.toString(),
+                                    tabUrl: _tabUrl,
+                                  );
+                                  
+                                  if (mounted) {
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(content: Text('Bug report created successfully')),
+                                    );
+                                    _loadData();
+                                  }
+                                } catch (e) {
+                                  print('Error creating bug report: $e');
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(content: Text('Error creating bug report: $e')),
+                                    );
+                                  }
+                                } finally {
+                                  if (mounted) {
+                                    setSubmitState(() {
+                                      _isSubmitting = false;
+                                    });
+                                  }
+                                }
+                              } else {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error creating bug report: $e')),
+                                  const SnackBar(content: Text('Please fill in all required fields')),
                                 );
                               }
-                            } else {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Please fill in all required fields')),
-                              );
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple[400],
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.purple[400],
+                              padding: const EdgeInsets.symmetric(vertical: 16),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
                             ),
-                          ),
-                          child: Text(
-                            'Submit',
-                            style: GoogleFonts.poppins(
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white,
-                            ),
+                            child: _isSubmitting
+                                ? const SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                    ),
+                                  )
+                                : Text(
+                                    'Submit',
+                                    style: GoogleFonts.poppins(
+                                      fontWeight: FontWeight.w500,
+                                      color: Colors.white,
+                                    ),
+                                  ),
                           ),
                         ),
                       ),
