@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../constants/api_constants.dart';
+import '../utils/token_storage.dart';
 
 class AuthService {
   Future<Map<String, dynamic>> login(String email, String password) async {
@@ -56,6 +57,31 @@ class AuthService {
       }
     } catch (e) {
       throw Exception('Failed to connect to server: $e');
+    }
+  }
+
+  Future<void> logout() async {
+    try {
+      // Clear all stored data
+      await TokenStorage.clearAll();
+      
+      // Attempt to notify the server about logout
+      final token = await TokenStorage.getToken();
+      if (token != null) {
+        try {
+          await http.post(
+            Uri.parse('${ApiConstants.baseUrl}/logout'),
+            headers: {
+              'Authorization': 'Bearer $token',
+            },
+          );
+        } catch (e) {
+          // Ignore server-side logout errors
+          print('Server logout failed: $e');
+        }
+      }
+    } catch (e) {
+      throw Exception('Failed to logout: $e');
     }
   }
 } 

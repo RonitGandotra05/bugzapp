@@ -13,50 +13,56 @@ enum SeverityLevel {
 
 class BugReport {
   final int id;
-  final String description;
-  final String creator;
-  final String recipient;
-  final int? creator_id;
-  final int? recipient_id;
-  final String? projectName;
-  final DateTime modifiedDate;
-  final BugStatus status;
-  final SeverityLevel severity;
   final String? imageUrl;
+  final String description;
+  final int? recipientId;
+  final int? creatorId;
+  final BugStatus status;
+  final String? recipient;
+  final String? creator;
   final String? mediaType;
+  final DateTime modifiedDate;
+  final SeverityLevel severity;
+  final int? projectId;
+  final String? projectName;
   final String? tabUrl;
+  final List<String> ccRecipients;
 
   BugReport({
     required this.id,
-    required this.description,
-    required this.creator,
-    required this.recipient,
-    this.creator_id,
-    this.recipient_id,
-    this.projectName,
-    required this.modifiedDate,
-    required this.status,
-    required this.severity,
     this.imageUrl,
+    required this.description,
+    this.recipientId,
+    this.creatorId,
+    required this.status,
+    this.recipient,
+    this.creator,
     this.mediaType,
+    required this.modifiedDate,
+    required this.severity,
+    this.projectId,
+    this.projectName,
     this.tabUrl,
+    this.ccRecipients = const [],
   });
 
   factory BugReport.fromJson(Map<String, dynamic> json) {
     return BugReport(
       id: json['id'] as int,
-      description: json['description'] as String,
-      creator: json['creator'] as String? ?? 'Unknown',
-      recipient: json['recipient'] as String? ?? 'Unassigned',
-      creator_id: json['creator_id'] as int?,
-      recipient_id: json['recipient_id'] as int?,
-      projectName: json['project_name'] as String?,
-      modifiedDate: DateTime.parse(json['modified_date']),
-      status: _parseStatus(json['status'] as String),
-      severity: _parseSeverity(json['severity'] as String),
       imageUrl: json['image_url'] as String?,
+      description: json['description'] as String,
+      recipientId: json['recipient_id'] as int?,
+      creatorId: json['creator_id'] as int?,
+      status: _parseStatus(json['status'] as String),
+      recipient: json['recipient'] as String?,
+      creator: json['creator'] as String?,
       mediaType: json['media_type'] as String?,
+      modifiedDate: DateTime.parse(json['modified_date']),
+      severity: _parseSeverity(json['severity'] as String),
+      projectId: json['project_id'] as int?,
+      projectName: json['project_name'] as String?,
       tabUrl: json['tab_url'] as String?,
+      ccRecipients: (json['cc_recipients'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
     );
   }
 

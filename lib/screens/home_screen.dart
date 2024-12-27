@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:google_fonts/google_fonts.dart';
@@ -21,6 +22,7 @@ import 'dart:convert';
 import 'dart:math' show pi;
 import 'package:universal_html/html.dart' as html;
 import '../widgets/custom_search_bar.dart';
+import 'package:http_parser/http_parser.dart';
 
 enum BugFilter {
   all,
@@ -43,142 +45,93 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  final BugReportService _bugReportService = BugReportService();
+  final _bugReportService = BugReportService();
+  final _searchController = TextEditingController();
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  final _formKey = GlobalKey<FormState>();
+  
   User? _currentUser;
-  String _userName = '';
-  bool _isLoading = false;
+  List<User> _users = [];
+  List<Project> _projects = [];
   List<BugReport> _bugReports = [];
-  List<Project> _availableProjects = [];
-  List<User> _availableUsers = [];
-  BugFilterType _currentFilter = BugFilterType.all;
-  File? _selectedFile;
-  bool _isAscendingOrder = false;
-  Uint8List? _webImageBytes;
-  BugFilter _currentBugFilter = BugFilter.all;
-  int? _currentUserId;
-  final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  bool _isLoading = true;
+  bool _isAscendingOrder = false;
+  String _userName = '';
+  BugFilter _currentBugFilter = BugFilter.all;
+  BugFilterType _currentFilter = BugFilterType.all;
+  
+  // Add missing variables for bug report form
+  String? _description;
+  User? _selectedRecipient;
+  File? _imageFile;
+  Uint8List? _webImageBytes;
+  String _selectedSeverity = 'low';
+  Project? _selectedProject;
+  String? _tabUrl;
+  List<User> _availableUsers = [];
+  List<Project> _availableProjects = [];
 
   @override
   void initState() {
     super.initState();
     _loadData();
-    _loadUserName();
-    _loadCurrentUser();
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
   }
 
   Future<void> _loadData() async {
-    if (mounted) {
-      setState(() => _isLoading = true);
-    }
-    
+    setState(() {
+      _isLoading = true;
+    });
+
     try {
-      final projects = await _bugReportService.fetchProjects();
-      final users = await _bugReportService.fetchUsers();
-      
-      List<BugReport> reports = [];
-      if (_currentUserId != null) {
-        switch (_currentBugFilter) {
-          case BugFilter.createdByMe:
-            print('Fetching created bugs for user: $_currentUserId');
-            reports = await _bugReportService.getCreatedBugReports(_currentUserId!);
-            break;
-          case BugFilter.assignedToMe:
-            print('Fetching assigned bugs for user: $_currentUserId');
-            reports = await _bugReportService.getAssignedBugReports(_currentUserId!);
-            break;
-          case BugFilter.all:
-          default:
-            reports = await _bugReportService.getAllBugReports();
-            break;
-        }
+      // Load current user first
+      final currentUser = await _bugReportService.getCurrentUser();
+      if (currentUser == null) {
+        _handleLogout();
+        return;
       }
+
+      print('Current user loaded in HomeScreen:');
+      print('  Name: ${currentUser.name}');
+      print('  Email: ${currentUser.email}');
+      print('  Is Admin: ${currentUser.isAdmin}');
+
+      final users = await _bugReportService.fetchUsers();
+      final projects = await _bugReportService.fetchProjects();
+      final bugReports = await _bugReportService.getAllBugReports();
 
       if (mounted) {
         setState(() {
-          _availableProjects = projects;
+          _currentUser = currentUser;
+          _userName = currentUser.name;
+          _users = users;
+          _projects = projects;
+          _bugReports = bugReports;
           _availableUsers = users;
-          _bugReports = reports;
+          _availableProjects = projects;
           _isLoading = false;
         });
+
+        // Preload comments for visible bug reports
+        final visibleBugIds = _getVisibleBugIds();
+        await _bugReportService.preloadComments(visibleBugIds);
       }
     } catch (e) {
       print('Error loading data: $e');
       if (mounted) {
-        setState(() => _isLoading = false);
-      }
-    }
-  }
-
-  Future<void> _loadUserName() async {
-    final token = await TokenStorage.getToken();
-    if (token != null) {
-      try {
-        final parts = token.split('.');
-        if (parts.length != 3) {
-          print('Invalid token format');
-          return;
-        }
-
-        final payload = parts[1];
-        final normalized = base64Url.normalize(payload);
-        final decoded = utf8.decode(base64Url.decode(normalized));
-        final data = json.decode(decoded);
-        
-        print('Token payload: $data'); // Debug print
-        
         setState(() {
-          _userName = data['sub'].toString().split('@')[0];
-          // Get ID from sub claim which contains the email
-          final userEmail = data['sub'].toString();
-          // Fetch user details to get ID
-          _fetchUserIdByEmail(userEmail);
+          _isLoading = false;
         });
-      } catch (e) {
-        print('Error decoding token: $e');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading data: $e')),
+        );
       }
     }
   }
 
-  Future<void> _fetchUserIdByEmail(String email) async {
-    try {
-      final users = await _bugReportService.fetchUsers();
-      final user = users.firstWhere(
-        (u) => u.email.toLowerCase() == email.toLowerCase(),
-        orElse: () => throw Exception('User not found'),
-      );
-      setState(() {
-        _currentUserId = user.id;
-      });
-      print('Current user ID: $_currentUserId'); // Debug print
-      _loadData(); // Reload data with correct user ID
-    } catch (e) {
-      print('Error fetching user ID: $e');
-    }
-  }
-
-  Future<void> _loadCurrentUser() async {
-    try {
-      final user = await _bugReportService.getCurrentUser();
-      if (mounted) {
-        setState(() {
-          _currentUser = user;
-          _currentUserId = user.id;
-          _userName = user.name;
-        });
-        // After setting current user, reload the data to apply filters
-        _loadData();
-      }
-    } catch (e) {
-      print('Error loading current user: $e');
-    }
+  List<int> _getVisibleBugIds() {
+    final visibleBugs = _sortedAndFilteredBugReports.take(10).toList();
+    return visibleBugs.map((bug) => bug.id).toList();
   }
 
   List<BugReport> get _filteredBugReports {
@@ -198,14 +151,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
     
     // Then apply user filter
-    if (_currentUserId != null) {
+    if (_currentUser != null) {
       switch (_currentBugFilter) {
         case BugFilter.createdByMe:
-          filtered = filtered.where((bug) => bug.creator_id == _currentUserId).toList();
+          filtered = filtered.where((bug) => bug.creatorId == _currentUser!.id).toList();
           break;
           
         case BugFilter.assignedToMe:
-          filtered = filtered.where((bug) => bug.recipient_id == _currentUserId).toList();
+          filtered = filtered.where((bug) => bug.recipientId == _currentUser!.id).toList();
           break;
           
         case BugFilter.all:
@@ -214,15 +167,17 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     }
 
-    // Apply search filter if search query exists
+    // Apply search filter if search text is not empty
     if (_searchQuery.isNotEmpty) {
-      filtered = filtered.where((bug) {
-        final searchLower = _searchQuery.toLowerCase();
-        return bug.description.toLowerCase().contains(searchLower) ||
-               bug.creator.toLowerCase().contains(searchLower) ||
-               bug.recipient.toLowerCase().contains(searchLower) ||
-               (bug.projectName?.toLowerCase().contains(searchLower) ?? false);
-      }).toList();
+      final searchLower = _searchQuery.toLowerCase();
+      filtered = filtered.where((bug) =>
+          bug.description.toLowerCase().contains(searchLower) ||
+          (bug.creator?.toLowerCase() ?? '').contains(searchLower) ||
+          (bug.recipient?.toLowerCase() ?? '').contains(searchLower) ||
+          bug.severityText.toLowerCase().contains(searchLower) ||
+          bug.statusText.toLowerCase().contains(searchLower) ||
+          (bug.projectName?.toLowerCase() ?? '').contains(searchLower)
+      ).toList();
     }
 
     return filtered;
@@ -310,13 +265,51 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _uploadBugReport() async {
+    if (_description == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Description is required')),
+      );
+      return;
+    }
+
+    try {
+      await _bugReportService.uploadBugReport(
+        description: _description!,
+        recipientId: _selectedRecipient!.id.toString(),
+        imageFile: _imageFile,
+        imageBytes: _webImageBytes,
+        severity: _selectedSeverity.toLowerCase(),
+        projectId: _selectedProject?.id.toString(),
+        tabUrl: _tabUrl,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bug report uploaded successfully')),
+        );
+        _resetForm();
+        _loadBugReports();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error uploading bug report: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
       appBar: AppBar(
         leading: IconButton(
-          icon: const Icon(Icons.menu),
+          icon: const Icon(
+            Icons.menu,
+            color: Colors.black87,
+          ),
           onPressed: () {
             _scaffoldKey.currentState?.openDrawer();
           },
@@ -355,9 +348,9 @@ class _HomeScreenState extends State<HomeScreen> {
             SliverToBoxAdapter(
               child: StatsPanel(
                 userName: _userName.capitalize(),
-                totalBugs: _bugReports.length,
-                resolvedBugs: _bugReports.where((bug) => bug.status == BugStatus.resolved).length,
-                pendingBugs: _bugReports.where((bug) => bug.status == BugStatus.assigned).length,
+                totalBugs: _filteredBugReports.length,
+                resolvedBugs: _filteredBugReports.where((bug) => bug.status == BugStatus.resolved).length,
+                pendingBugs: _filteredBugReports.where((bug) => bug.status == BugStatus.assigned).length,
                 onFilterChange: _handleStatusFilterChange,
                 currentFilter: _currentFilter,
               ),
@@ -406,10 +399,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       child: Material(
                         color: Colors.transparent,
                         child: PopupMenuButton<BugFilter>(
-                          icon: Icon(
-                            Icons.filter_list,
-                            size: 20,
-                            color: Colors.purple[400],
+                          padding: EdgeInsets.zero,
+                          icon: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Icon(
+                              Icons.filter_list,
+                              size: 24,
+                              color: Colors.purple[400],
+                            ),
                           ),
                           initialValue: _currentBugFilter,
                           onSelected: (BugFilter filter) {
@@ -489,7 +486,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                       ),
                     ),
-                    // Existing Sort Button
+                    // Sort Button
                     Container(
                       decoration: BoxDecoration(
                         color: Colors.white,
@@ -513,7 +510,7 @@ class _HomeScreenState extends State<HomeScreen> {
                               _isAscendingOrder 
                                   ? Icons.arrow_upward
                                   : Icons.arrow_downward,
-                              size: 20,
+                              size: 24,
                               color: Colors.purple[400],
                             ),
                           ),
@@ -1082,13 +1079,10 @@ class _HomeScreenState extends State<HomeScreen> {
                                 
                                 await _bugReportService.uploadBugReport(
                                   description: _description!,
-                                  availableUsers: _availableUsers,
+                                  recipientId: _selectedRecipient!.id.toString(),
+                                  ccRecipients: _selectedCCRecipients.map((user) => user.name).toList(),
                                   imageFile: _selectedFile,
                                   imageBytes: _webImageBytes,
-                                  recipientId: _selectedRecipient!.id.toString(),
-                                  ccRecipients: _selectedCCRecipients
-                                      .map((user) => user.name)
-                                      .toList(),
                                   severity: _selectedSeverity,
                                   projectId: _selectedProject?.id.toString(),
                                   tabUrl: _tabUrl,
@@ -1138,6 +1132,36 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  void _resetForm() {
+    setState(() {
+      _description = null;
+      _selectedRecipient = null;
+      _imageFile = null;
+      _webImageBytes = null;
+      _selectedSeverity = 'low';
+      _selectedProject = null;
+      _tabUrl = null;
+    });
+  }
+
+  Future<void> _loadBugReports() async {
+    try {
+      final reports = await _bugReportService.getAllBugReports();
+      if (mounted) {
+        setState(() {
+          _bugReports = reports;
+        });
+      }
+    } catch (e) {
+      print('Error loading bug reports: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading bug reports: $e')),
+        );
+      }
+    }
   }
 }
 

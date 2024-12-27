@@ -1,120 +1,168 @@
 import 'package:flutter/material.dart';
+import 'dart:async';
 import '../models/bug_report.dart';
 import '../models/bug_filter.dart';
 import '../models/user.dart';
+import '../models/comment.dart';
 import '../services/bug_report_service.dart';
 import '../services/logging_service.dart';
 
 class BugReportProvider with ChangeNotifier {
-  final BugReportService _bugReportService = BugReportService();
-  final LoggingService _logger = LoggingService();
-  
+  final BugReportService _bugReportService;
   List<BugReport> _bugReports = [];
   User? _currentUser;
   bool _isLoading = false;
-  BugFilter _filter = BugFilter();
+  bool _isInitializing = false;
   String _error = '';
+  Timer? _refreshTimer;
+  Timer? _debounceTimer;
+  bool _mounted = true;
+  
+  BugReportProvider(this._bugReportService) {
+    initialize();
+  }
 
-  // Getters
   List<BugReport> get bugReports => _bugReports;
   User? get currentUser => _currentUser;
   bool get isLoading => _isLoading;
-  BugFilter get filter => _filter;
   String get error => _error;
 
-  // Initialize data
+  @override
+  void dispose() {
+    _mounted = false;
+    _refreshTimer?.cancel();
+    _debounceTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> initialize() async {
-    await getCurrentUser();
-    if (_currentUser != null) {
-      await loadBugReports();
-    }
-  }
-
-  // Get current user
-  Future<void> getCurrentUser() async {
-    _setLoading(true);
+    if (_isInitializing || !_mounted) return;
+    _isInitializing = true;
+    _error = '';
+    
     try {
-      _logger.info('Getting current user');
-      _currentUser = await _bugReportService.getCurrentUser();
-      _logger.info('Current user loaded: ${_currentUser?.email}');
-    } catch (e, stackTrace) {
-      _error = 'Failed to get current user';
-      _logger.error(_error, error: e, stackTrace: stackTrace);
-    } finally {
-      _setLoading(false);
-    }
-  }
+      _isLoading = true;
+      notifyListeners();
 
-  // Load bug reports based on filter
-  Future<void> loadBugReports() async {
-    if (_currentUser == null) {
-      _error = 'No user logged in';
-      return;
-    }
-
-    _setLoading(true);
-    try {
-      _logger.info('Loading bug reports for filter: ${_filter.toString()}');
+      // Get current user with timeout
+      _currentUser = await _getCurrentUserWithTimeout();
+      if (!_mounted) return;
       
-      if (_filter.createdByMe) {
-        _bugReports = await _bugReportService.getCreatedBugReports(_currentUser!.id);
-      } else if (_filter.assignedToMe) {
-        _bugReports = await _bugReportService.getAssignedBugReports(_currentUser!.id);
+      if (_currentUser == null) {
+        _error = 'Failed to get current user';
+        _isLoading = false;
+        notifyListeners();
+        return;
       }
+
+      // Load bug reports
+      await loadBugReports();
       
-      _error = '';
-      _logger.info('Loaded ${_bugReports.length} bug reports');
-    } catch (e, stackTrace) {
-      _error = 'Failed to load bug reports';
-      _logger.error(_error, error: e, stackTrace: stackTrace);
+      // Start periodic refresh if not already running
+      _refreshTimer?.cancel();
+      _refreshTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+        if (_mounted) loadBugReports(silent: true);
+      });
+    } catch (e) {
+      _error = 'Error initializing: $e';
     } finally {
-      _setLoading(false);
+      _isInitializing = false;
+      if (_mounted) {
+        _isLoading = false;
+        notifyListeners();
+      }
     }
   }
 
-  // Toggle bug status
-  Future<void> toggleBugStatus(int bugId) async {
-    _setLoading(true);
+  Future<User?> _getCurrentUserWithTimeout() async {
     try {
-      _logger.info('Toggling status for bug #$bugId');
+      return await _bugReportService.getCurrentUser().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw TimeoutException('Getting current user timed out'),
+      );
+    } catch (e) {
+      _error = 'Error getting current user: $e';
+      return null;
+    }
+  }
+
+  Future<void> loadBugReports({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      notifyListeners();
+    }
+
+    try {
+      // Load all bug reports
+      final reports = await _bugReportService.getAllBugReports().timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw TimeoutException('Loading bug reports timed out'),
+      );
+      
+      if (!_mounted) return;
+      
+      _bugReports = reports;
+      _error = '';
+      
+      // Cache comments in background
+      _cacheCommentsInBackground();
+    } catch (e) {
+      _error = 'Error loading bug reports: $e';
+    } finally {
+      if (!silent && _mounted) {
+        _isLoading = false;
+        notifyListeners();
+      }
+    }
+  }
+
+  void _cacheCommentsInBackground() {
+    for (final bug in _bugReports) {
+      _bugReportService.getComments(bug.id).then((_) {
+        // Comments are now cached
+      }).catchError((e) {
+        print('Error caching comments for bug #${bug.id}: $e');
+      });
+    }
+  }
+
+  Future<void> toggleBugStatus(int bugId) async {
+    try {
       await _bugReportService.toggleBugStatus(bugId);
       await loadBugReports();
-      _logger.info('Successfully toggled status for bug #$bugId');
-    } catch (e, stackTrace) {
-      _error = 'Failed to toggle bug status';
-      _logger.error(_error, error: e, stackTrace: stackTrace);
-    } finally {
-      _setLoading(false);
+    } catch (e) {
+      _error = 'Error toggling bug status: $e';
+      notifyListeners();
     }
   }
 
-  // Delete bug report
   Future<void> deleteBugReport(int bugId) async {
-    _setLoading(true);
     try {
-      _logger.info('Deleting bug #$bugId');
       await _bugReportService.deleteBugReport(bugId);
-      await loadBugReports();
-      _logger.info('Successfully deleted bug #$bugId');
-    } catch (e, stackTrace) {
-      _error = 'Failed to delete bug report';
-      _logger.error(_error, error: e, stackTrace: stackTrace);
-    } finally {
-      _setLoading(false);
+      _bugReports.removeWhere((bug) => bug.id == bugId);
+      notifyListeners();
+    } catch (e) {
+      _error = 'Error deleting bug report: $e';
+      notifyListeners();
     }
   }
 
-  // Update filter
-  void updateFilter(BugFilter newFilter) {
-    _logger.info('Updating filter: ${newFilter.toString()}');
-    _filter = newFilter;
-    loadBugReports(); // Reload bugs with new filter
-    notifyListeners();
+  Future<void> sendReminder(int bugId) async {
+    try {
+      await _bugReportService.sendReminder(bugId);
+    } catch (e) {
+      _error = 'Error sending reminder: $e';
+      notifyListeners();
+    }
   }
 
-  // Helper method to set loading state
-  void _setLoading(bool loading) {
-    _isLoading = loading;
+  void reset() {
+    _bugReports = [];
+    _currentUser = null;
+    _isLoading = false;
+    _error = '';
+    _refreshTimer?.cancel();
+    _debounceTimer?.cancel();
     notifyListeners();
   }
 } 

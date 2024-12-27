@@ -19,17 +19,38 @@ class ProjectManagementScreen extends StatefulWidget {
 class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
   final BugReportService _bugReportService = BugReportService();
   List<Project> _projects = [];
-  bool _isLoading = true;
   Project? _selectedProject;
   List<BugReport> _projectBugReports = [];
+  bool _isLoading = true;
   String _sortBy = 'date';
   bool _sortAscending = false;
+  final PageController _pageController = PageController();
+  bool _isAdmin = false;
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    // Load projects immediately
     _loadProjects();
+    _checkAdminStatus();
+  }
+
+  Future<void> _checkAdminStatus() async {
+    try {
+      final user = await _bugReportService.getCurrentUser();
+      if (mounted) {
+        setState(() {
+          _isAdmin = user?.isAdmin ?? false;
+        });
+      }
+    } catch (e) {
+      print('Error checking admin status: $e');
+    }
   }
 
   Future<void> _loadProjects() async {
@@ -62,88 +83,7 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
     }
   }
 
-  Future<void> _loadProjectBugReports(int projectId) async {
-    try {
-      // First, try to get bug reports from cache
-      final cachedBugReports = await _bugReportService.getBugReportsInProject(projectId, fromCache: true);
-      if (mounted && cachedBugReports.isNotEmpty) {
-        setState(() {
-          _projectBugReports = _sortBugReports(cachedBugReports);
-          _isLoading = false;
-        });
-      }
-
-      // Then fetch fresh data in background
-      final freshBugReports = await _bugReportService.getBugReportsInProject(projectId, fromCache: false);
-      if (mounted && !listEquals(freshBugReports, _projectBugReports)) {
-        setState(() {
-          _projectBugReports = _sortBugReports(freshBugReports);
-        });
-      }
-
-      // Pre-fetch comments for each bug report in the background
-      for (final bug in _projectBugReports) {
-        _bugReportService.getComments(bug.id).then((comments) {
-          // Comments are now cached
-        }).catchError((e) {
-          // Silently handle error as this is background loading
-          print('Error pre-fetching comments for bug #${bug.id}: $e');
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading bug reports: $e')),
-        );
-      }
-    }
-  }
-
-  List<BugReport> _sortBugReports(List<BugReport> reports) {
-    switch (_sortBy) {
-      case 'date':
-        reports.sort((a, b) => _sortAscending
-            ? a.modifiedDate.compareTo(b.modifiedDate)
-            : b.modifiedDate.compareTo(a.modifiedDate));
-        break;
-      case 'severity':
-        reports.sort((a, b) {
-          final severityOrder = {'high': 0, 'medium': 1, 'low': 2};
-          final aValue = severityOrder[a.severityText.toLowerCase()] ?? 3;
-          final bValue = severityOrder[b.severityText.toLowerCase()] ?? 3;
-          return _sortAscending ? aValue.compareTo(bValue) : bValue.compareTo(aValue);
-        });
-        break;
-      case 'status':
-        reports.sort((a, b) {
-          final statusOrder = {'assigned': 0, 'resolved': 1};
-          final aValue = statusOrder[a.statusText.toLowerCase()] ?? 2;
-          final bValue = statusOrder[b.statusText.toLowerCase()] ?? 2;
-          return _sortAscending ? aValue.compareTo(bValue) : bValue.compareTo(aValue);
-        });
-        break;
-    }
-    return reports;
-  }
-
-  void _handleSort(String? value) {
-    if (value != null) {
-      setState(() {
-        if (_sortBy == value) {
-          _sortAscending = !_sortAscending;
-        } else {
-          _sortBy = value;
-          _sortAscending = false;
-        }
-        _projectBugReports = _sortBugReports(_projectBugReports);
-      });
-    }
-  }
-
-  Future<void> _showCreateProjectDialog() async {
+  Future<void> _showAddProjectDialog() async {
     final nameController = TextEditingController();
     final descriptionController = TextEditingController();
     final formKey = GlobalKey<FormState>();
@@ -247,7 +187,7 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
     );
   }
 
-  Future<void> _showDeleteProjectDialog(Project project) async {
+  Future<void> _showDeleteConfirmation(Project project) async {
     return showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -307,10 +247,7 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
                 );
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('Error deleting project: $e'),
-                    backgroundColor: Colors.red,
-                  ),
+                  SnackBar(content: Text('Error deleting project: $e')),
                 );
               }
             },
@@ -323,57 +260,13 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
             child: Text(
               'Delete',
               style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w600,
+                color: Colors.white,
               ),
             ),
           ),
         ],
       ),
     );
-  }
-
-  void _showBugDetails(BugReport bug) {
-    // Show the dialog immediately
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) => BugDetailsDialog(
-        bug: bug,
-        imageUrl: bug.imageUrl,
-        mediaType: bug.mediaType,
-        tabUrl: bug.tabUrl,
-        bugReportService: _bugReportService,
-      ),
-    );
-
-    // Pre-fetch comments in the background
-    _bugReportService.getComments(bug.id).then((comments) {
-      // Comments are now cached for instant access
-    }).catchError((e) {
-      // Silently handle error as this is background loading
-      print('Error pre-fetching comments for bug #${bug.id}: $e');
-    });
-  }
-
-  Future<void> _handleRemoveFromProject(BugReport bug) async {
-    try {
-      await _bugReportService.removeBugReportFromProject(
-        _selectedProject!.id,
-        bug.id,
-      );
-      _loadProjectBugReports(_selectedProject!.id);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Bug report removed from project'),
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error removing bug report: $e'),
-        ),
-      );
-    }
   }
 
   @override
@@ -406,199 +299,56 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
                   ],
                 ),
               ),
-              child: Row(
-                children: [
-                  // Projects List
-                  Container(
-                    width: 300,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 10,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
+              child: ListView.builder(
+                itemCount: _projects.length,
+                padding: const EdgeInsets.all(16),
+                itemBuilder: (context, index) {
+                  final project = _projects[index];
+                  return Card(
+                    elevation: 2,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Column(
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'Projects',
-                            style: GoogleFonts.poppins(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.all(16),
+                      title: Text(
+                        project.name,
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.w600,
                         ),
-                        Expanded(
-                          child: ListView.builder(
-                            itemCount: _projects.length,
-                            padding: const EdgeInsets.symmetric(vertical: 8),
-                            itemBuilder: (context, index) {
-                              final project = _projects[index];
-                              final isSelected = _selectedProject?.id == project.id;
-                              return ListTile(
-                                selected: isSelected,
-                                selectedTileColor: Colors.purple[50],
-                                leading: Icon(
-                                  Icons.folder,
-                                  color: isSelected ? Colors.purple[400] : Colors.grey[600],
-                                ),
-                                title: Text(
-                                  project.name,
-                                  style: GoogleFonts.poppins(
-                                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                                  ),
-                                ),
-                                subtitle: Text(
-                                  project.description ?? 'No description',
-                                  style: GoogleFonts.poppins(
-                                    fontSize: 12,
-                                    color: Colors.grey[600],
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                trailing: IconButton(
-                                  icon: Icon(
-                                    Icons.delete_outline,
-                                    color: Colors.red[400],
-                                  ),
-                                  onPressed: () => _showDeleteProjectDialog(project),
-                                  tooltip: 'Delete Project',
-                                ),
-                                onTap: () {
-                                  setState(() {
-                                    _selectedProject = project;
-                                  });
-                                  _loadProjectBugReports(project.id);
-                                },
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  // Bug Reports List
-                  Expanded(
-                    child: _selectedProject == null
-                        ? Center(
-                            child: Text(
-                              'Select a project to view bug reports',
+                      ),
+                      subtitle: project.description != null
+                          ? Text(
+                              project.description!,
                               style: GoogleFonts.poppins(
+                                fontSize: 12,
                                 color: Colors.grey[600],
                               ),
-                            ),
-                          )
-                        : Column(
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.all(16),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        'Bug Reports in ${_selectedProject!.name}',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 20,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                    ),
-                                    SortDropdown(
-                                      value: _sortBy,
-                                      ascending: _sortAscending,
-                                      onChanged: _handleSort,
-                                    ),
-                                  ],
-                                ),
+                            )
+                          : null,
+                      trailing: _isAdmin
+                          ? IconButton(
+                              icon: Icon(
+                                Icons.delete_outline,
+                                color: Colors.red[400],
                               ),
-                              Expanded(
-                                child: ListView.builder(
-                                  itemCount: _projectBugReports.length,
-                                  padding: const EdgeInsets.all(16),
-                                  itemBuilder: (context, index) {
-                                    final bug = _projectBugReports[index];
-                                    return Padding(
-                                      padding: const EdgeInsets.only(bottom: 16),
-                                      child: InkWell(
-                                        onTap: () => _showBugDetails(bug),
-                                        child: BugCard(
-                                          bug: bug,
-                                          onStatusToggle: () {
-                                            _loadProjectBugReports(_selectedProject!.id);
-                                          },
-                                          onSendReminder: () async {
-                                            try {
-                                              final response = await _bugReportService.sendReminder(bug.id);
-                                              
-                                              // Get the timestamp from response
-                                              final timestamp = response['timestamp'] as String;
-                                              
-                                              // The backend sends time in "dd MMMM hh:mm a" format already in IST
-                                              // So we just need to display it as is
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(
-                                                  content: Column(
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                                    children: [
-                                                      Text('Reminder sent successfully at $timestamp'),
-                                                      if (response['notifications_sent']?.isNotEmpty ?? false)
-                                                        Text(
-                                                          'Sent to: ${(response['notifications_sent'] as List).join(", ")}',
-                                                          style: TextStyle(fontSize: 12),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                ),
-                                              );
-                                            } catch (e) {
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(
-                                                  content: Text('Error sending reminder: $e'),
-                                                  backgroundColor: Colors.red,
-                                                ),
-                                              );
-                                            }
-                                          },
-                                          onDelete: () async {
-                                            try {
-                                              await _bugReportService.deleteBugReport(bug.id);
-                                              _loadProjectBugReports(_selectedProject!.id);
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                const SnackBar(content: Text('Bug report deleted successfully')),
-                                              );
-                                            } catch (e) {
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(
-                                                  content: Text('Error deleting bug report: $e'),
-                                                  backgroundColor: Colors.red,
-                                                ),
-                                              );
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                  ),
-                ],
+                              onPressed: () => _showDeleteConfirmation(project),
+                              tooltip: 'Delete Project',
+                            )
+                          : null,
+                    ),
+                  );
+                },
               ),
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showCreateProjectDialog,
-        child: const Icon(Icons.create_new_folder),
-        backgroundColor: Colors.purple[400],
-      ),
+      floatingActionButton: _isAdmin
+          ? FloatingActionButton(
+              onPressed: _showAddProjectDialog,
+              child: const Icon(Icons.add),
+              backgroundColor: Colors.purple[400],
+            )
+          : null,
     );
   }
 } 

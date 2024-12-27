@@ -13,23 +13,27 @@ import 'comment_dialog.dart';
 
 class BugCard extends StatefulWidget {
   final BugReport bug;
-  final Future<void> Function() onSendReminder;
   final VoidCallback onStatusToggle;
-  final Function() onDelete;
+  final VoidCallback onDelete;
+  final Future<void> Function() onSendReminder;
 
   const BugCard({
     Key? key,
     required this.bug,
     required this.onStatusToggle,
-    required this.onSendReminder,
     required this.onDelete,
+    required this.onSendReminder,
   }) : super(key: key);
 
   @override
-  State<BugCard> createState() => _BugCardState();
+  _BugCardState createState() => _BugCardState();
 }
 
 class _BugCardState extends State<BugCard> {
+  bool _isExpanded = false;
+  bool _commentsLoaded = false;
+  List<Comment> _comments = [];
+  bool _isLoadingComments = false;
   bool _isLoading = false;
 
   String _formatToIST(DateTime utcTime) {
@@ -75,126 +79,139 @@ class _BugCardState extends State<BugCard> {
 
   // Comments section
   Widget _buildCommentsSection() {
-    return FutureBuilder<List<Comment>>(
-      future: BugReportService().getComments(widget.bug.id),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return const SizedBox.shrink();  // Don't show anything while loading
+    if (!_commentsLoaded && !_isLoadingComments) {
+      // Only load comments when the card is visible
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _loadComments();
         }
+      });
+      return const SizedBox.shrink();
+    }
 
-        final comments = snapshot.data ?? [];
-        if (comments.isEmpty) {
-          return const SizedBox.shrink();
-        }
+    if (_isLoadingComments) {
+      return const SizedBox(
+        height: 50,
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
 
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    if (_comments.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 24),
+        Row(
           children: [
-            const Divider(height: 24),
-            Row(
-              children: [
-                Icon(Icons.comment_outlined, 
-                  size: 14, 
-                  color: Colors.grey[600]
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Comments (${comments.length})',
+            Icon(Icons.comment_outlined, 
+              size: 14, 
+              color: Colors.grey[600]
+            ),
+            const SizedBox(width: 4),
+            Text(
+              'Comments (${_comments.length})',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+                color: Colors.grey[700],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        ..._comments.take(2).map((comment) => Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                radius: 12,
+                backgroundColor: Colors.grey[200],
+                child: Text(
+                  comment.userName[0].toUpperCase(),
                   style: GoogleFonts.poppins(
+                    fontSize: 10,
                     fontWeight: FontWeight.w600,
-                    fontSize: 12,
                     color: Colors.grey[700],
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            ...comments.take(2).map((comment) => Container(  // Only show latest 2 comments
-              margin: const EdgeInsets.only(bottom: 8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  CircleAvatar(
-                    radius: 12,
-                    backgroundColor: Colors.grey[200],
-                    child: Text(
-                      comment.userName[0].toUpperCase(),
-                      style: GoogleFonts.poppins(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey[700],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
                       children: [
-                        Row(
-                          children: [
-                            Text(
-                              comment.userName,
-                              style: GoogleFonts.poppins(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.grey[800],
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              '•',
-                              style: TextStyle(
-                                color: Colors.grey[400],
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              timeago.format(comment.createdAt),
-                              style: GoogleFonts.poppins(
-                                fontSize: 10,
-                                color: Colors.grey[500],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
                         Text(
-                          comment.comment,
+                          comment.userName,
                           style: GoogleFonts.poppins(
                             fontSize: 11,
-                            color: Colors.grey[700],
-                            height: 1.4,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey[800],
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '•',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 11,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          timeago.format(comment.createdAt),
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            color: Colors.grey[500],
+                          ),
                         ),
                       ],
                     ),
-                  ),
-                ],
-              ),
-            )).toList(),
-            if (comments.length > 2)  // Show "View all" if there are more comments
-              TextButton(
-                onPressed: () => _showBugDetails(context),
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: Text(
-                  'View all ${comments.length} comments',
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    color: Colors.blue[700],
-                  ),
+                    const SizedBox(height: 2),
+                    Text(
+                      comment.comment,
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        color: Colors.grey[700],
+                        height: 1.4,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
-          ],
-        );
-      },
+            ],
+          ),
+        )).toList(),
+        if (_comments.length > 2)
+          TextButton(
+            onPressed: () => _showBugDetails(context),
+            style: TextButton.styleFrom(
+              padding: EdgeInsets.zero,
+              minimumSize: Size.zero,
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            child: Text(
+              'View all ${_comments.length} comments',
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                color: Colors.blue[700],
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -493,5 +510,30 @@ class _BugCardState extends State<BugCard> {
         ),
       ),
     );
+  }
+
+  Future<void> _loadComments() async {
+    if (_isLoadingComments) return;
+    
+    setState(() => _isLoadingComments = true);
+    
+    try {
+      final comments = await BugReportService().getComments(widget.bug.id);
+      if (mounted) {
+        setState(() {
+          _comments = comments;
+          _commentsLoaded = true;
+          _isLoadingComments = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading comments: $e');
+      if (mounted) {
+        setState(() => _isLoadingComments = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading comments: $e')),
+        );
+      }
+    }
   }
 } 

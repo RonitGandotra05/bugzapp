@@ -16,6 +16,17 @@ class User {
   });
 
   factory User.fromJson(Map<String, dynamic> json) {
+    // Handle case where the response is just a name string
+    if (json['name'] == null && json['id'] == null) {
+      return User(
+        id: -1, // Temporary ID
+        name: json.toString(), // Use the string value as name
+        email: '', // Empty email
+        phone: '', // Empty phone
+        isAdmin: false, // Default to non-admin
+      );
+    }
+
     return User(
       id: json['id'] as int,
       name: json['name'] as String,

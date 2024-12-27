@@ -2,16 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'screens/splash_screen.dart';
 import 'providers/bug_report_provider.dart';
+import 'services/bug_report_service.dart';
 import 'services/logging_service.dart';
 
 void main() {
   final logger = LoggingService();
   logger.info('Starting BugZapp application');
   
+  final bugReportService = BugReportService();
+  
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => BugReportProvider()),
+        ChangeNotifierProvider(
+          create: (_) => BugReportProvider(bugReportService),
+        ),
       ],
       child: const MyApp(),
     ),
