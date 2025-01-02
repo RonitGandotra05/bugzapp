@@ -62,10 +62,14 @@ class TokenStorage {
 
   static Future<void> clearAll() async {
     final prefs = await SharedPreferences.getInstance();
+    // Clear all auth-related data
     await prefs.remove(_tokenKey);
     await prefs.remove(_isAdminKey);
     await prefs.remove(_userIdKey);
     await prefs.remove(_tokenExpiryKey);
+    // Clear any other cached data
+    await prefs.remove('current_user');
+    await prefs.remove('user_data');
   }
 
   static Future<bool> isLoggedIn() async {

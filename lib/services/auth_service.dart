@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../constants/api_constants.dart';
 import '../utils/token_storage.dart';
+import '../services/bug_report_service.dart';
 
 class AuthService {
   Future<Map<String, dynamic>> login(String email, String password) async {
@@ -65,8 +66,13 @@ class AuthService {
       // Clear all stored data
       await TokenStorage.clearAll();
       
-      // Attempt to notify the server about logout
+      // Get token before clearing for server notification
       final token = await TokenStorage.getToken();
+      
+      // Clear BugReportService cache
+      BugReportService().clearCache();
+      
+      // Attempt to notify the server about logout
       if (token != null) {
         try {
           await http.post(

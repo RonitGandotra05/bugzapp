@@ -44,6 +44,72 @@ class HomeScreen extends StatefulWidget {
   _HomeScreenState createState() => _HomeScreenState();
 }
 
+class BugFilterManager {
+  final List<BugReport> allBugs;
+  final BugFilter userFilter;
+  final BugFilterType statusFilter;
+  final User? currentUser;
+  final String searchQuery;
+
+  BugFilterManager({
+    required this.allBugs,
+    required this.userFilter,
+    required this.statusFilter,
+    required this.currentUser,
+    this.searchQuery = '',
+  });
+
+  List<BugReport> get userFilteredBugs {
+    switch (userFilter) {
+      case BugFilter.assignedToMe:
+        return allBugs.where((bug) => bug.recipientId == currentUser?.id).toList();
+      case BugFilter.createdByMe:
+        return allBugs.where((bug) => bug.creatorId == currentUser?.id).toList();
+      case BugFilter.all:
+      default:
+        return allBugs;
+    }
+  }
+
+  List<BugReport> get filteredByStatus {
+    final baseList = userFilteredBugs;
+    switch (statusFilter) {
+      case BugFilterType.resolved:
+        return baseList.where((bug) => bug.status == BugStatus.resolved).toList();
+      case BugFilterType.pending:
+        return baseList.where((bug) => bug.status == BugStatus.assigned).toList();
+      case BugFilterType.all:
+      default:
+        return baseList;
+    }
+  }
+
+  List<BugReport> get searchFiltered {
+    if (searchQuery.isEmpty) return filteredByStatus;
+    
+    final searchLower = searchQuery.toLowerCase();
+    return filteredByStatus.where((bug) =>
+      bug.description.toLowerCase().contains(searchLower) ||
+      (bug.creator?.toLowerCase() ?? '').contains(searchLower) ||
+      (bug.recipient?.toLowerCase() ?? '').contains(searchLower) ||
+      bug.severityText.toLowerCase().contains(searchLower) ||
+      bug.statusText.toLowerCase().contains(searchLower) ||
+      (bug.projectName?.toLowerCase() ?? '').contains(searchLower)
+    ).toList();
+  }
+
+  // Stats calculations
+  int get totalBugs => userFilteredBugs.length;
+  
+  int get resolvedBugs => userFilteredBugs
+    .where((bug) => bug.status == BugStatus.resolved)
+    .length;
+  
+  int get pendingBugs => userFilteredBugs
+    .where((bug) => bug.status == BugStatus.assigned)
+    .length;
+}
+
 class _HomeScreenState extends State<HomeScreen> {
   final _bugReportService = BugReportService();
   final _searchController = TextEditingController();
@@ -73,10 +139,56 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Project> _availableProjects = [];
   bool _isSubmitting = false;
 
+  late BugFilterManager _filterManager;
+
   @override
   void initState() {
     super.initState();
+    _filterManager = BugFilterManager(
+      allBugs: [],
+      userFilter: _currentBugFilter,
+      statusFilter: _currentFilter,
+      currentUser: null,
+    );
     _loadData();
+  }
+
+  void _updateFilterManager() {
+    _filterManager = BugFilterManager(
+      allBugs: _bugReports,
+      userFilter: _currentBugFilter,
+      statusFilter: _currentFilter,
+      currentUser: _currentUser,
+      searchQuery: _searchQuery,
+    );
+  }
+
+  List<BugReport> get _filteredBugReports {
+    _updateFilterManager();
+    return _filterManager.searchFiltered;
+  }
+
+  List<BugReport> get _sortedAndFilteredBugReports {
+    final filtered = _filteredBugReports;
+    return List.from(filtered)..sort((a, b) => _isAscendingOrder 
+      ? a.modifiedDate.compareTo(b.modifiedDate)
+      : b.modifiedDate.compareTo(a.modifiedDate));
+  }
+
+  // Update stats methods to use filter manager
+  int _getTotalBugs() {
+    _updateFilterManager();
+    return _filterManager.totalBugs;
+  }
+
+  int _getResolvedBugs() {
+    _updateFilterManager();
+    return _filterManager.resolvedBugs;
+  }
+
+  int _getPendingBugs() {
+    _updateFilterManager();
+    return _filterManager.pendingBugs;
   }
 
   Future<void> _loadData() async {
@@ -133,62 +245,6 @@ class _HomeScreenState extends State<HomeScreen> {
   List<int> _getVisibleBugIds() {
     final visibleBugs = _sortedAndFilteredBugReports.take(10).toList();
     return visibleBugs.map((bug) => bug.id).toList();
-  }
-
-  List<BugReport> get _filteredBugReports {
-    List<BugReport> filtered = [];
-    
-    // First apply status filter
-    switch (_currentFilter) {
-      case BugFilterType.resolved:
-        filtered = _bugReports.where((bug) => bug.status == BugStatus.resolved).toList();
-        break;
-      case BugFilterType.pending:
-        filtered = _bugReports.where((bug) => bug.status == BugStatus.assigned).toList();
-        break;
-      case BugFilterType.all:
-      default:
-        filtered = _bugReports;
-    }
-    
-    // Then apply user filter
-    if (_currentUser != null) {
-      switch (_currentBugFilter) {
-        case BugFilter.createdByMe:
-          filtered = filtered.where((bug) => bug.creatorId == _currentUser!.id).toList();
-          break;
-          
-        case BugFilter.assignedToMe:
-          filtered = filtered.where((bug) => bug.recipientId == _currentUser!.id).toList();
-          break;
-          
-        case BugFilter.all:
-        default:
-          break;
-      }
-    }
-
-    // Apply search filter if search text is not empty
-    if (_searchQuery.isNotEmpty) {
-      final searchLower = _searchQuery.toLowerCase();
-      filtered = filtered.where((bug) =>
-          bug.description.toLowerCase().contains(searchLower) ||
-          (bug.creator?.toLowerCase() ?? '').contains(searchLower) ||
-          (bug.recipient?.toLowerCase() ?? '').contains(searchLower) ||
-          bug.severityText.toLowerCase().contains(searchLower) ||
-          bug.statusText.toLowerCase().contains(searchLower) ||
-          (bug.projectName?.toLowerCase() ?? '').contains(searchLower)
-      ).toList();
-    }
-
-    return filtered;
-  }
-
-  List<BugReport> get _sortedAndFilteredBugReports {
-    final filtered = _filteredBugReports;
-    return List.from(filtered)..sort((a, b) => _isAscendingOrder 
-      ? a.modifiedDate.compareTo(b.modifiedDate)
-      : b.modifiedDate.compareTo(a.modifiedDate));
   }
 
   void _handleStatusFilterChange(BugFilterType filter) {
@@ -301,6 +357,17 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Widget _buildStatsPanel() {
+    return StatsPanel(
+      userName: _userName.capitalize(),
+      totalBugs: _getTotalBugs(),
+      resolvedBugs: _getResolvedBugs(),
+      pendingBugs: _getPendingBugs(),
+      onFilterChange: _handleStatusFilterChange,
+      currentFilter: _currentFilter,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -347,14 +414,7 @@ class _HomeScreenState extends State<HomeScreen> {
           slivers: [
             // Stats Panel
             SliverToBoxAdapter(
-              child: StatsPanel(
-                userName: _userName.capitalize(),
-                totalBugs: _filteredBugReports.length,
-                resolvedBugs: _filteredBugReports.where((bug) => bug.status == BugStatus.resolved).length,
-                pendingBugs: _filteredBugReports.where((bug) => bug.status == BugStatus.assigned).length,
-                onFilterChange: _handleStatusFilterChange,
-                currentFilter: _currentFilter,
-              ),
+              child: _buildStatsPanel(),
             ),
             // Search Bar
             SliverToBoxAdapter(

@@ -55,6 +55,9 @@ class BugReportProvider with ChangeNotifier {
         return;
       }
 
+      // Load all comments first
+      await _bugReportService.loadAllComments();
+
       // Load bug reports
       await loadBugReports();
       

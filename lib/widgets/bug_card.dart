@@ -513,12 +513,16 @@ class _BugCardState extends State<BugCard> {
   }
 
   Future<void> _loadComments() async {
-    if (_isLoadingComments) return;
+    if (!mounted) return;
     
-    setState(() => _isLoadingComments = true);
-    
+    setState(() {
+      _isLoadingComments = true;
+    });
+
     try {
+      // Get comments from cache through the service
       final comments = await BugReportService().getComments(widget.bug.id);
+      
       if (mounted) {
         setState(() {
           _comments = comments;
@@ -529,10 +533,9 @@ class _BugCardState extends State<BugCard> {
     } catch (e) {
       print('Error loading comments: $e');
       if (mounted) {
-        setState(() => _isLoadingComments = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading comments: $e')),
-        );
+        setState(() {
+          _isLoadingComments = false;
+        });
       }
     }
   }

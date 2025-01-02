@@ -19,7 +19,7 @@ class Comment {
       bugReportId: json['bug_report_id'] as int,
       userName: json['user_name'] as String,
       comment: json['comment'] as String,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      createdAt: DateTime.parse(json['created_at']),
     );
   }
 

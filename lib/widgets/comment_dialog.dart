@@ -20,7 +20,7 @@ class _CommentDialogState extends State<CommentDialog> {
   final TextEditingController _commentController = TextEditingController();
   List<Comment> _comments = [];
   bool _isLoading = true;
-  bool _isSubmitting = false;
+  bool _isSending = false;
   String? _error;
 
   @override
@@ -37,38 +37,123 @@ class _CommentDialogState extends State<CommentDialog> {
       });
       
       final comments = await widget.bugReportService.getComments(widget.bugId);
-      setState(() {
-        _comments = comments;
-        _isLoading = false;
-      });
+      
+      if (mounted) {
+        setState(() {
+          _comments = comments;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = 'Failed to load comments: ${e.toString()}';
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load comments: ${e.toString()}';
+          _isLoading = false;
+        });
+      }
     }
   }
 
-  Future<void> _submitComment() async {
-    if (_commentController.text.trim().isEmpty || _isSubmitting) return;
+  Future<void> _addComment() async {
+    final comment = _commentController.text.trim();
+    if (comment.isEmpty) return;
 
-    setState(() => _isSubmitting = true);
+    setState(() {
+      _isSending = true;
+    });
+
     try {
-      final newComment = await widget.bugReportService.addComment(
-        widget.bugId,
-        _commentController.text.trim(),
-      );
-      setState(() {
-        _comments = [..._comments, newComment];
-        _commentController.clear();
-      });
+      await widget.bugReportService.addComment(widget.bugId, comment);
+      _commentController.clear();
+      await _loadComments();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error adding comment: $e')),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error adding comment: $e')),
+        );
+      }
     } finally {
-      setState(() => _isSubmitting = false);
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+        });
+      }
     }
+  }
+
+  Widget _buildCommentInput() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(
+          top: BorderSide(color: Colors.grey[300]!),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _commentController,
+              decoration: InputDecoration(
+                hintText: 'Add a comment...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide(color: Colors.purple[300]!),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                filled: true,
+                fillColor: Colors.grey[50],
+              ),
+              minLines: 1,
+              maxLines: 4,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.purple[400],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _isSending ? null : _addComment,
+                customBorder: const CircleBorder(),
+                child: Padding(
+                  padding: const EdgeInsets.all(10.0),
+                  child: _isSending
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.send,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -123,38 +208,7 @@ class _CommentDialogState extends State<CommentDialog> {
                     ),
             ),
             const Divider(),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _commentController,
-                    decoration: InputDecoration(
-                      hintText: 'Add a comment...',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    maxLines: null,
-                    enabled: !_isSubmitting,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  icon: _isSubmitting
-                    ? SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                        ),
-                      )
-                    : const Icon(Icons.send),
-                  onPressed: _isSubmitting ? null : _submitComment,
-                  color: Colors.blue,
-                ),
-              ],
-            ),
+            _buildCommentInput(),
           ],
         ),
       ),
