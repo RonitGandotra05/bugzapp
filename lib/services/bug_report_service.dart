@@ -737,16 +737,12 @@ class BugReportService {
   }
 
   void _clearUserRelatedCaches() {
-    _cache.remove('users');
-    _cache.remove('all_users');
-    _cache.remove('current_user');
-    _cache.remove('projects');
-    _cache.remove('all_bug_reports');
-    _cache.remove('created_bugs');
-    _cache.remove('assigned_bugs');
+    print('Clearing all caches');
+    _cache.clear();  // Clear all cached data
     _commentCache.clear();
     _processedCommentIds.clear();
     _lastCommentRefresh = null;
+    _cacheExpiry.clear();
   }
 
   void _handleProjectEvent(String action, Map<String, dynamic> payload) {
@@ -791,5 +787,35 @@ class BugReportService {
     _cache[cacheKey] = result;
     _cacheExpiry[cacheKey] = DateTime.now().add(_cacheDuration);
     return result;
+  }
+
+  Future<void> refreshEverything() async {
+    try {
+      print('Starting complete refresh of all data');
+      
+      // Clear all caches first
+      _clearUserRelatedCaches();
+      _initialCommentsFetched = false;
+      
+      // Reinitialize WebSocket connection
+      await initializeWebSocket();
+      
+      // Fetch fresh bug reports
+      final reports = await getAllBugReportsNoCache();
+      print('Refreshed ${reports.length} bug reports');
+      
+      // Load all comments
+      await loadAllComments();
+      print('Refreshed all comments');
+      
+      // Fetch fresh projects
+      await fetchProjects(fromCache: false);
+      print('Refreshed projects');
+      
+      print('Complete refresh finished successfully');
+    } catch (e) {
+      print('Error during complete refresh: $e');
+      rethrow;
+    }
   }
 } 

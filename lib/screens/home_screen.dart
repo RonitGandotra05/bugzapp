@@ -439,6 +439,41 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _refreshEverything() async {
+    setState(() => _isLoading = true);
+    try {
+      // Clear all caches and reinitialize everything
+      await _bugReportService.refreshEverything();
+      
+      // Reload all data
+      await _loadData();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Refreshed successfully'),
+            duration: Duration(seconds: 2),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error during refresh: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error refreshing: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -469,232 +504,235 @@ class _HomeScreenState extends State<HomeScreen> {
         isAdmin: _currentUser?.isAdmin ?? false,
         onLogout: _handleLogout,
       ),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [
-              const Color(0xFF9575CD),
-              const Color(0xFF7E57C2),
-              const Color(0xFF673AB7),
-            ],
-          ),
-        ),
-        child: CustomScrollView(
-          slivers: [
-            // Stats Panel
-            SliverToBoxAdapter(
-              child: _buildStatsPanel(),
+      body: RefreshIndicator(
+        onRefresh: _refreshEverything,
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFF9575CD),
+                const Color(0xFF7E57C2),
+                const Color(0xFF673AB7),
+              ],
             ),
-            // Search Bar
-            SliverToBoxAdapter(
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                child: CustomSearchBar(
-                  controller: _searchController,
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
-                  },
-                  onClear: () {
-                    setState(() {
-                      _searchQuery = '';
-                    });
-                  },
-                  hintText: 'Search by description, creator, or project...',
+          ),
+          child: CustomScrollView(
+            slivers: [
+              // Stats Panel
+              SliverToBoxAdapter(
+                child: _buildStatsPanel(),
+              ),
+              // Search Bar
+              SliverToBoxAdapter(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  child: CustomSearchBar(
+                    controller: _searchController,
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value;
+                      });
+                    },
+                    onClear: () {
+                      setState(() {
+                        _searchQuery = '';
+                      });
+                    },
+                    hintText: 'Search by description, creator, or project...',
+                  ),
                 ),
               ),
-            ),
-            // Filter Chips
-            SliverToBoxAdapter(
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    // Filter Button
-                    Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: PopupMenuButton<BugFilter>(
-                          padding: EdgeInsets.zero,
-                          icon: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Icon(
-                              Icons.filter_list,
-                              size: 24,
-                              color: Colors.purple[400],
-                            ),
-                          ),
-                          initialValue: _currentBugFilter,
-                          onSelected: (BugFilter filter) {
-                            _handleUserFilterChange(filter);
-                          },
-                          itemBuilder: (BuildContext context) => [
-                            PopupMenuItem(
-                              value: BugFilter.all,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.all_inbox,
-                                    color: _currentBugFilter == BugFilter.all
-                                        ? Colors.purple[400]
-                                        : Colors.grey,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'All Bugs',
-                                    style: TextStyle(
-                                      color: _currentBugFilter == BugFilter.all
-                                          ? Colors.purple[400]
-                                          : Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: BugFilter.createdByMe,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.create,
-                                    color: _currentBugFilter == BugFilter.createdByMe
-                                        ? Colors.purple[400]
-                                        : Colors.grey,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Created by Me',
-                                    style: TextStyle(
-                                      color: _currentBugFilter == BugFilter.createdByMe
-                                          ? Colors.purple[400]
-                                          : Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            PopupMenuItem(
-                              value: BugFilter.assignedToMe,
-                              child: Row(
-                                children: [
-                                  Icon(
-                                    Icons.assignment_ind,
-                                    color: _currentBugFilter == BugFilter.assignedToMe
-                                        ? Colors.purple[400]
-                                        : Colors.grey,
-                                    size: 20,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'Assigned to Me',
-                                    style: TextStyle(
-                                      color: _currentBugFilter == BugFilter.assignedToMe
-                                          ? Colors.purple[400]
-                                          : Colors.grey[600],
-                                    ),
-                                  ),
-                                ],
-                              ),
+              // Filter Chips
+              SliverToBoxAdapter(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    children: [
+                      // Filter Button
+                      Container(
+                        margin: const EdgeInsets.only(right: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
                             ),
                           ],
                         ),
-                      ),
-                    ),
-                    // Sort Button
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: PopupMenuButton<BugFilter>(
+                            padding: EdgeInsets.zero,
+                            icon: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Icon(
+                                Icons.filter_list,
+                                size: 24,
+                                color: Colors.purple[400],
+                              ),
+                            ),
+                            initialValue: _currentBugFilter,
+                            onSelected: (BugFilter filter) {
+                              _handleUserFilterChange(filter);
+                            },
+                            itemBuilder: (BuildContext context) => [
+                              PopupMenuItem(
+                                value: BugFilter.all,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.all_inbox,
+                                      color: _currentBugFilter == BugFilter.all
+                                          ? Colors.purple[400]
+                                          : Colors.grey,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'All Bugs',
+                                      style: TextStyle(
+                                        color: _currentBugFilter == BugFilter.all
+                                            ? Colors.purple[400]
+                                            : Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: BugFilter.createdByMe,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.create,
+                                      color: _currentBugFilter == BugFilter.createdByMe
+                                          ? Colors.purple[400]
+                                          : Colors.grey,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Created by Me',
+                                      style: TextStyle(
+                                        color: _currentBugFilter == BugFilter.createdByMe
+                                            ? Colors.purple[400]
+                                            : Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PopupMenuItem(
+                                value: BugFilter.assignedToMe,
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.assignment_ind,
+                                      color: _currentBugFilter == BugFilter.assignedToMe
+                                          ? Colors.purple[400]
+                                          : Colors.grey,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Assigned to Me',
+                                      style: TextStyle(
+                                        color: _currentBugFilter == BugFilter.assignedToMe
+                                            ? Colors.purple[400]
+                                            : Colors.grey[600],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: _toggleSortOrder,
-                          customBorder: const CircleBorder(),
+                      // Sort Button
+                      Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: _toggleSortOrder,
+                            customBorder: const CircleBorder(),
+                            child: Padding(
+                              padding: const EdgeInsets.all(8.0),
+                              child: Icon(
+                                _isAscendingOrder 
+                                    ? Icons.arrow_upward
+                                    : Icons.arrow_downward,
+                                size: 24,
+                                color: Colors.purple[400],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // Bug List
+              SliverToBoxAdapter(
+                child: Container(
+                  color: const Color(0xFFFAF9F6),
+                  child: Column(
+                    children: [
+                      if (_isLoading)
+                        const Center(child: CircularProgressIndicator())
+                      else if (_sortedAndFilteredBugReports.isEmpty)
+                        Center(
                           child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Icon(
-                              _isAscendingOrder 
-                                  ? Icons.arrow_upward
-                                  : Icons.arrow_downward,
-                              size: 24,
-                              color: Colors.purple[400],
+                            padding: const EdgeInsets.all(16.0),
+                            child: Text(
+                              'No bug reports found',
+                              style: GoogleFonts.poppins(
+                                fontSize: 16,
+                                color: Colors.grey[600],
+                              ),
                             ),
                           ),
+                        )
+                      else
+                        ListView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          itemCount: _sortedAndFilteredBugReports.length,
+                          itemBuilder: (context, index) {
+                            final bug = _sortedAndFilteredBugReports[index];
+                            return BugCard(
+                              bug: bug,
+                              onStatusToggle: () => _toggleBugStatus(bug.id),
+                              onDelete: () => _deleteBugReport(bug.id),
+                              onSendReminder: () => _sendReminder(bug.id),
+                              bugReportService: _bugReportService,
+                            );
+                          },
                         ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            // Bug List
-            SliverToBoxAdapter(
-              child: Container(
-                color: const Color(0xFFFAF9F6),
-                child: Column(
-                  children: [
-                    if (_isLoading)
-                      const Center(child: CircularProgressIndicator())
-                    else if (_sortedAndFilteredBugReports.isEmpty)
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16.0),
-                          child: Text(
-                            'No bug reports found',
-                            style: GoogleFonts.poppins(
-                              fontSize: 16,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ),
-                      )
-                    else
-                      ListView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        itemCount: _sortedAndFilteredBugReports.length,
-                        itemBuilder: (context, index) {
-                          final bug = _sortedAndFilteredBugReports[index];
-                          return BugCard(
-                            bug: bug,
-                            onStatusToggle: () => _toggleBugStatus(bug.id),
-                            onDelete: () => _deleteBugReport(bug.id),
-                            onSendReminder: () => _sendReminder(bug.id),
-                            bugReportService: _bugReportService,
-                          );
-                        },
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
@@ -1163,6 +1201,14 @@ class _HomeScreenState extends State<HomeScreen> {
           SnackBar(content: Text('Error loading bug reports: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _loadComments(List<int> bugIds) async {
+    try {
+      await _bugReportService.preloadComments(bugIds);
+    } catch (e) {
+      print('Error preloading comments: $e');
     }
   }
 }
