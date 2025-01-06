@@ -69,20 +69,56 @@ class BugReportService {
             switch (type) {
               case 'bug_report':
                 final action = payload['event'];
-                print('Handling bug report event: $action');
-                _handleBugReportEvent(action, payload);
+                final bugReportData = payload['bug_report'];
+                print('Handling bug report event: $action with data: $bugReportData');
+                
+                if (action == 'created' || action == 'updated') {
+                  // Create BugReport object from the WebSocket data
+                  final bugReport = BugReport.fromJson(bugReportData);
+                  print('Created bug report object: ${bugReport.id} - ${bugReport.description}');
+                  
+                  // Clear cache and notify listeners immediately
+                  _cache.remove('all_bug_reports');
+                  _bugReportController.add(bugReport);
+                  
+                  // Then refresh the full list
+                  getAllBugReportsNoCache().then((reports) {
+                    print('Bug reports refreshed after WebSocket event. Total: ${reports.length}');
+                    if (reports.isNotEmpty) {
+                      print('First report after refresh: ID=${reports.first.id}, Date=${reports.first.modifiedDate}');
+                    }
+                  }).catchError((e) {
+                    print('Error refreshing bug reports: $e');
+                  });
+                } else if (action == 'deleted') {
+                  // Handle deletion
+                  _cache.remove('all_bug_reports');
+                  getAllBugReportsNoCache();
+                }
                 break;
               case 'comment':
                 print('Handling comment event');
-                _handleCommentEvent(payload['event'], payload);
+                final action = payload['event'];
+                _handleCommentEvent(action, payload);
+                // Refresh comments in background
+                _commentCache.clear();
+                loadAllComments();
                 break;
               case 'project':
                 print('Handling project event');
-                _handleProjectEvent(payload['event'], payload);
+                final action = payload['event'];
+                _handleProjectEvent(action, payload);
+                // Refresh projects in background
+                _cache.remove('projects');
+                fetchProjects(fromCache: false);
                 break;
               case 'user':
                 print('Handling user event');
-                _handleUserEvent(payload['event'], payload);
+                final action = payload['event'];
+                _handleUserEvent(action, payload);
+                // Refresh users in background
+                _cache.remove('users');
+                fetchUsers();
                 break;
               case 'system':
                 print('System message: ${payload['message']}');
@@ -108,190 +144,9 @@ class BugReportService {
     }
   }
 
-  void _handleBugReportEvent(String action, Map<String, dynamic> payload) {
+  // New method to get bug reports without cache
+  Future<List<BugReport>> getAllBugReportsNoCache() async {
     try {
-      print('Handling bug report event: $action with payload: $payload');
-      
-      // Extract the bug report data from the correct location in payload
-      final bugReportData = Map<String, dynamic>.from(payload['bug_report'] ?? payload);
-      print('Processing bug report data: $bugReportData');
-      
-      // Ensure we have the minimum required fields
-      if (bugReportData['id'] == null) {
-        print('Error: Bug report data missing ID');
-        return;
-      }
-      
-      // Add default values for required fields if they're missing
-      bugReportData.putIfAbsent('modified_date', () => DateTime.now().toIso8601String());
-      bugReportData.putIfAbsent('status', () => 'assigned');
-      bugReportData.putIfAbsent('severity', () => 'low');
-      bugReportData.putIfAbsent('description', () => 'No description');
-      bugReportData.putIfAbsent('creator', () => 'Unknown');
-      bugReportData.putIfAbsent('recipient', () => 'None');
-      bugReportData.putIfAbsent('project_name', () => 'No Project');
-      bugReportData.putIfAbsent('cc_recipients', () => []);
-      
-      print('Prepared bug report data: $bugReportData');
-      
-      final bugReport = BugReport.fromJson(bugReportData);
-      print('Successfully parsed bug report: ${bugReport.id} - ${bugReport.description} - Created by: ${bugReport.creator}');
-      
-      switch (action) {
-        case 'created':
-          print('Received new bug report via WebSocket: ID ${bugReport.id}');
-          _updateBugReportCache(bugReport);
-          _bugReportController.add(bugReport);
-          // Refresh the bug reports list to ensure we have the latest data
-          getAllBugReports();
-          break;
-        case 'updated':
-          print('Received bug report update via WebSocket: ID ${bugReport.id}');
-          _updateBugReportCache(bugReport);
-          _bugReportController.add(bugReport);
-          break;
-        case 'deleted':
-          print('Received bug report deletion via WebSocket: ID ${bugReport.id}');
-          _deleteBugReportFromCache(bugReport.id);
-          _bugReportController.add(bugReport);
-          break;
-      }
-    } catch (e, stackTrace) {
-      print('Error handling bug report event: $e');
-      print('Stack trace: $stackTrace');
-      print('Original payload: $payload');
-    }
-  }
-
-  void _handleCommentEvent(String action, Map<String, dynamic> payload) {
-    try {
-      final comment = Comment.fromJson(payload);
-      
-      switch (action) {
-        case 'created':
-          _addCommentToCache(comment);
-          _commentController.add(comment);
-          break;
-        case 'updated':
-          _updateCommentInCache(comment);
-          _commentController.add(comment);
-          break;
-        case 'deleted':
-          _deleteCommentFromCache(comment);
-          _commentController.add(comment);
-          break;
-      }
-    } catch (e) {
-      print('Error handling comment event: $e');
-    }
-  }
-
-  void _handleProjectEvent(String action, Map<String, dynamic> payload) {
-    try {
-      final project = Project.fromJson(payload);
-      _projectController.add(project);
-    } catch (e) {
-      print('Error handling project event: $e');
-    }
-  }
-
-  void _handleUserEvent(String action, Map<String, dynamic> payload) {
-    try {
-      final user = User.fromJson(payload);
-      _userController.add(user);
-    } catch (e) {
-      print('Error handling user event: $e');
-    }
-  }
-
-  // Cache management methods
-  void _updateBugReportCache(BugReport bugReport) {
-    final reports = (_cache['all_bug_reports'] as List<BugReport>? ?? []).toList();
-    final index = reports.indexWhere((b) => b.id == bugReport.id);
-    
-    if (index != -1) {
-      reports[index] = bugReport;
-    } else {
-      reports.add(bugReport);
-    }
-    
-    // Sort by modified_date in descending order (most recent first)
-    reports.sort((a, b) => b.modifiedDate.compareTo(a.modifiedDate));
-    
-    _cache['all_bug_reports'] = reports;
-  }
-
-  void _deleteBugReportFromCache(int bugId) {
-    final reports = (_cache['all_bug_reports'] as List<BugReport>? ?? []).toList();
-    reports.removeWhere((b) => b.id == bugId);
-    _cache['all_bug_reports'] = reports;
-    _commentCache.remove(bugId);
-  }
-
-  void _addCommentToCache(Comment comment) {
-    if (!_commentCache.containsKey(comment.bugReportId)) {
-      _commentCache[comment.bugReportId] = [];
-    }
-    _commentCache[comment.bugReportId]!.add(comment);
-  }
-
-  void _updateCommentInCache(Comment comment) {
-    final comments = _commentCache[comment.bugReportId];
-    if (comments != null) {
-      final index = comments.indexWhere((c) => c.id == comment.id);
-      if (index != -1) {
-        comments[index] = comment;
-      }
-    }
-  }
-
-  void _deleteCommentFromCache(Comment comment) {
-    final comments = _commentCache[comment.bugReportId];
-    if (comments != null) {
-      comments.removeWhere((c) => c.id == comment.id);
-    }
-  }
-
-  void _clearUserRelatedCaches() {
-    _cache.remove('users');
-    _cache.remove('all_users');
-    _cache.remove('current_user');
-    _cache.remove('projects');
-    _cache.remove('all_bug_reports');
-    _cache.remove('created_bugs');
-    _cache.remove('assigned_bugs');
-    _commentCache.clear();
-  }
-
-  // Utility methods
-  Future<Map<String, String>> _getAuthHeaders() async {
-    final token = await TokenStorage.getToken();
-    if (token == null) {
-      return {
-        'Content-Type': 'application/json',
-      };
-    }
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
-  }
-
-  Future<T> _throttledRequest<T>(String cacheKey, Future<T> Function() request) async {
-    if (_cache.containsKey(cacheKey) && 
-        _cacheExpiry[cacheKey]!.isAfter(DateTime.now())) {
-      return _cache[cacheKey] as T;
-    }
-
-    final result = await request();
-    _cache[cacheKey] = result;
-    _cacheExpiry[cacheKey] = DateTime.now().add(_cacheDuration);
-    return result;
-  }
-
-  // Public API methods
-  Future<List<BugReport>> getAllBugReports() async {
-    return _throttledRequest('all_bug_reports', () async {
       final response = await http.get(
         Uri.parse('${ApiConstants.baseUrl}${ApiConstants.bugReportsEndpoint}'),
         headers: await _getAuthHeaders(),
@@ -301,16 +156,38 @@ class BugReportService {
         final List<dynamic> data = jsonDecode(response.body);
         final reports = data.map((json) => BugReport.fromJson(json)).toList();
         
-        // Sort by modified_date in descending order (most recent first)
-        reports.sort((a, b) => b.modifiedDate.compareTo(a.modifiedDate));
+        // Sort reports by modified date and ID
+        reports.sort((a, b) {
+          final dateComparison = b.modifiedDate.compareTo(a.modifiedDate);
+          if (dateComparison != 0) return dateComparison;
+          return b.id.compareTo(a.id);
+        });
         
-        // Update cache with sorted data
-        _cache['all_bug_reports'] = reports;
+        // Update cache with fresh data
+        _cache['all_bug_reports'] = List<BugReport>.from(reports);
+        print('Fetched and sorted ${reports.length} bug reports without cache');
+        if (reports.isNotEmpty) {
+          print('First report: ID=${reports.first.id}, Date=${reports.first.modifiedDate}');
+        }
+        
+        // Notify listeners of the updated list
+        if (reports.isNotEmpty) {
+          _bugReportController.add(reports.first);
+        }
         
         return reports;
       }
       throw Exception('Failed to load bug reports');
-    });
+    } catch (e) {
+      print('Error in getAllBugReportsNoCache: $e');
+      rethrow;
+    }
+  }
+
+  // Public API methods
+  Future<List<BugReport>> getAllBugReports() async {
+    // Always get fresh data for bug reports
+    return getAllBugReportsNoCache();
   }
 
   Future<List<Comment>> getComments(int bugId) async {
@@ -341,18 +218,33 @@ class BugReportService {
   }
 
   Future<void> addComment(int bugId, String comment) async {
-    final response = await http.post(
-      Uri.parse('${ApiConstants.baseUrl}${ApiConstants.bugReportsEndpoint}/$bugId/comments'),
-      headers: await _getAuthHeaders(),
-      body: jsonEncode({'comment': comment}),
-    );
+    try {
+      final response = await _dio.post(
+        '${ApiConstants.baseUrl}/bug_reports/$bugId/comments',
+        data: {'comment': comment},
+        options: Options(
+          headers: await _getAuthHeaders(),
+          validateStatus: (status) => status! < 500,
+        ),
+      );
 
-    if (response.statusCode == 201) {
-      final commentData = Comment.fromJson(jsonDecode(response.body));
-      _addCommentToCache(commentData);
-      _commentController.add(commentData);
-    } else {
-      throw Exception('Failed to add comment');
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        final errorDetail = response.data is Map ? response.data['detail'] : response.statusMessage;
+        throw Exception('Failed to add comment: $errorDetail');
+      }
+
+      // Add the new comment to cache
+      if (response.data != null) {
+        final commentData = Comment.fromJson(response.data);
+        _addCommentToCache(commentData);
+        _commentController.add(commentData);
+      }
+
+      // Refresh all comments
+      await loadAllComments();
+    } catch (e) {
+      print('Error adding comment: $e');
+      rethrow;
     }
   }
 
@@ -714,14 +606,17 @@ class BugReportService {
 
   // Comment Management Methods
   Future<void> loadAllComments() async {
-    if (!_initialCommentsFetched) {
-      final response = await http.get(
-        Uri.parse('${ApiConstants.baseUrl}/all_comments'),
-        headers: await _getAuthHeaders(),
+    try {
+      final response = await _dio.get(
+        '${ApiConstants.baseUrl}/all_comments',
+        options: Options(
+          headers: await _getAuthHeaders(),
+          validateStatus: (status) => status! < 500,
+        ),
       );
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
+        final List<dynamic> data = response.data;
         
         _commentCache.clear();
         for (var commentJson in data) {
@@ -730,7 +625,115 @@ class BugReportService {
         }
         
         _initialCommentsFetched = true;
+      } else {
+        final errorDetail = response.data is Map ? response.data['detail'] : response.statusMessage;
+        throw Exception('Failed to load comments: $errorDetail');
       }
+    } catch (e) {
+      print('Error loading all comments: $e');
+      rethrow;
+    }
+  }
+
+  // Utility methods
+  Future<Map<String, String>> _getAuthHeaders() async {
+    final token = await TokenStorage.getToken();
+    if (token == null) {
+      return {
+        'Content-Type': 'application/json',
+      };
+    }
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
+  Future<T> _throttledRequest<T>(String cacheKey, Future<T> Function() request) async {
+    if (_cache.containsKey(cacheKey) && 
+        _cacheExpiry[cacheKey]!.isAfter(DateTime.now())) {
+      return _cache[cacheKey] as T;
+    }
+
+    final result = await request();
+    _cache[cacheKey] = result;
+    _cacheExpiry[cacheKey] = DateTime.now().add(_cacheDuration);
+    return result;
+  }
+
+  void _addCommentToCache(Comment comment) {
+    if (!_commentCache.containsKey(comment.bugReportId)) {
+      _commentCache[comment.bugReportId] = [];
+    }
+    _commentCache[comment.bugReportId]!.add(comment);
+  }
+
+  void _updateCommentInCache(Comment comment) {
+    final comments = _commentCache[comment.bugReportId];
+    if (comments != null) {
+      final index = comments.indexWhere((c) => c.id == comment.id);
+      if (index != -1) {
+        comments[index] = comment;
+      }
+    }
+  }
+
+  void _deleteCommentFromCache(Comment comment) {
+    final comments = _commentCache[comment.bugReportId];
+    if (comments != null) {
+      comments.removeWhere((c) => c.id == comment.id);
+    }
+  }
+
+  void _clearUserRelatedCaches() {
+    _cache.remove('users');
+    _cache.remove('all_users');
+    _cache.remove('current_user');
+    _cache.remove('projects');
+    _cache.remove('all_bug_reports');
+    _cache.remove('created_bugs');
+    _cache.remove('assigned_bugs');
+    _commentCache.clear();
+  }
+
+  void _handleCommentEvent(String action, Map<String, dynamic> payload) {
+    try {
+      final comment = Comment.fromJson(payload);
+      
+      switch (action) {
+        case 'created':
+          _addCommentToCache(comment);
+          _commentController.add(comment);
+          break;
+        case 'updated':
+          _updateCommentInCache(comment);
+          _commentController.add(comment);
+          break;
+        case 'deleted':
+          _deleteCommentFromCache(comment);
+          _commentController.add(comment);
+          break;
+      }
+    } catch (e) {
+      print('Error handling comment event: $e');
+    }
+  }
+
+  void _handleProjectEvent(String action, Map<String, dynamic> payload) {
+    try {
+      final project = Project.fromJson(payload);
+      _projectController.add(project);
+    } catch (e) {
+      print('Error handling project event: $e');
+    }
+  }
+
+  void _handleUserEvent(String action, Map<String, dynamic> payload) {
+    try {
+      final user = User.fromJson(payload);
+      _userController.add(user);
+    } catch (e) {
+      print('Error handling user event: $e');
     }
   }
 } 
