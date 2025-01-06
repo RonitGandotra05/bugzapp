@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../utils/token_storage.dart';
 import 'home_screen.dart';
 import 'forgot_password_screen.dart';
+import '../services/bug_report_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -32,38 +33,63 @@ class _LoginScreenState extends State<LoginScreen> {
     });
   }
 
-  Future<void> _login() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _isLoading = true);
+  Future<void> _handleLogin() async {
+    if (_formKey.currentState!.validate()) {
+      setState(() {
+        _isLoading = true;
+      });
 
-    try {
-      final response = await _authService.login(
-        _emailController.text,
-        _passwordController.text,
-      );
-
-      await TokenStorage.saveToken(response['access_token']);
-      await TokenStorage.saveIsAdmin(response['is_admin']);
-      await TokenStorage.saveUserId(response['id']);
-
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+      try {
+        final response = await _authService.login(
+          _emailController.text,
+          _passwordController.text,
         );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Login failed: $e'),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
+
+        if (response['access_token'] != null) {
+          await TokenStorage.saveToken(response['access_token']);
+          await TokenStorage.saveIsAdmin(response['is_admin'] ?? false);
+          
+          // Handle user_id more safely
+          final userId = response['user_id'];
+          if (userId != null) {
+            await TokenStorage.saveUserId(userId);
+          }
+
+          final bugReportService = BugReportService();
+          await bugReportService.loadAllComments();
+          await bugReportService.initializeWebSocket(); // Initialize WebSocket after successful login
+
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const HomeScreen()),
+            );
+          }
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Invalid credentials'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Login failed: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      } finally {
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
       }
     }
   }
@@ -277,7 +303,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       SizedBox(
                                         height: 48,
                                         child: ElevatedButton(
-                                          onPressed: _isLoading ? null : _login,
+                                          onPressed: _isLoading ? null : _handleLogin,
                                           style: ElevatedButton.styleFrom(
                                             // Metallic purple gradient background
                                             backgroundColor: Colors.transparent,

@@ -5,11 +5,13 @@ import '../services/bug_report_service.dart';
 class CommentDialog extends StatefulWidget {
   final int bugId;
   final BugReportService bugReportService;
+  final Function(bool)? onCommentAdding;
 
   const CommentDialog({
     Key? key,
     required this.bugId,
     required this.bugReportService,
+    this.onCommentAdding,
   }) : super(key: key);
 
   @override
@@ -61,6 +63,7 @@ class _CommentDialogState extends State<CommentDialog> {
     setState(() {
       _isSending = true;
     });
+    widget.onCommentAdding?.call(true);
 
     try {
       await widget.bugReportService.addComment(widget.bugId, comment);
@@ -77,6 +80,7 @@ class _CommentDialogState extends State<CommentDialog> {
         setState(() {
           _isSending = false;
         });
+        widget.onCommentAdding?.call(false);
       }
     }
   }

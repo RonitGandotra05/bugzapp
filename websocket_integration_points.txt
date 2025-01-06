@@ -1,0 +1,324 @@
+# FastAPI WebSocket Integration Points
+
+## Bug Reports Module (bug_reports.py)
+
+1. Create Bug Report
+```python
+@router.post("/")
+async def create_bug_report(bug_report: BugReportCreate):
+    new_bug_report = await crud.create_bug_report(bug_report)
+    
+    # Broadcast to all connected clients
+    await websocket_manager.broadcast_to_all({
+        "type": "bug_report",
+        "action": "created",
+        "payload": new_bug_report.dict()
+    })
+    
+    # Notify assigned user
+    if new_bug_report.assignee_id:
+        await websocket_manager.broadcast_to_user(
+            new_bug_report.assignee_id,
+            {
+                "type": "notification",
+                "action": "bug_assigned",
+                "payload": {
+                    "bug_report_id": new_bug_report.id,
+                    "title": new_bug_report.title,
+                    "message": f"You have been assigned to bug: {new_bug_report.title}"
+                }
+            }
+        )
+    
+    return new_bug_report
+
+2. Update Bug Report Status
+```python
+@router.put("/{bug_id}/status")
+async def update_bug_status(
+    bug_id: int,
+    status: BugStatus
+):
+    updated_bug = await crud.update_bug_status(bug_id, status)
+    
+    # Broadcast status change
+    await websocket_manager.broadcast_to_all({
+        "type": "bug_report",
+        "action": "status_changed",
+        "payload": updated_bug.dict()
+    })
+    
+    # Notify relevant users
+    await websocket_manager.broadcast_to_user(
+        updated_bug.creator_id,
+        {
+            "type": "notification",
+            "action": "status_changed",
+            "payload": {
+                "bug_report_id": bug_id,
+                "title": updated_bug.title,
+                "status": status.value,
+                "message": f"Bug status changed to: {status.value}"
+            }
+        }
+    )
+    
+    return updated_bug
+```
+
+## Comments Module (comments.py)
+
+1. Add Comment
+```python
+@router.post("/{bug_id}/comments")
+async def add_comment(
+    bug_id: int,
+    comment: CommentCreate
+):
+    new_comment = await crud.create_comment(bug_id, comment)
+    
+    # Broadcast to all clients
+    await websocket_manager.broadcast_to_all({
+        "type": "comment",
+        "action": "created",
+        "payload": new_comment.dict()
+    })
+    
+    # Get bug report details
+    bug_report = await crud.get_bug_report(bug_id)
+    
+    # Notify bug report creator and assignee
+    for user_id in [bug_report.creator_id, bug_report.assignee_id]:
+        if user_id and user_id != comment.user_id:
+            await websocket_manager.broadcast_to_user(
+                user_id,
+                {
+                    "type": "notification",
+                    "action": "comment_added",
+                    "payload": {
+                        "bug_report_id": bug_id,
+                        "title": bug_report.title,
+                        "comment_id": new_comment.id,
+                        "message": f"New comment on bug: {bug_report.title}"
+                    }
+                }
+            )
+    
+    return new_comment
+```
+
+## Projects Module (projects.py)
+
+1. Create Project
+```python
+@router.post("/")
+async def create_project(project: ProjectCreate):
+    new_project = await crud.create_project(project)
+    
+    # Broadcast to all clients
+    await websocket_manager.broadcast_to_all({
+        "type": "project",
+        "action": "created",
+        "payload": new_project.dict()
+    })
+    
+    return new_project
+
+2. Update Project
+```python
+@router.put("/{project_id}")
+async def update_project(
+    project_id: int,
+    project: ProjectUpdate
+):
+    updated_project = await crud.update_project(project_id, project)
+    
+    # Broadcast to all clients
+    await websocket_manager.broadcast_to_all({
+        "type": "project",
+        "action": "updated",
+        "payload": updated_project.dict()
+    })
+    
+    return updated_project
+```
+
+## Users Module (users.py)
+
+1. Update User Status
+```python
+@router.put("/{user_id}/status")
+async def update_user_status(
+    user_id: int,
+    status: UserStatus
+):
+    updated_user = await crud.update_user_status(user_id, status)
+    
+    # Broadcast to admin clients
+    await websocket_manager.broadcast_to_admins({
+        "type": "user",
+        "action": "status_changed",
+        "payload": updated_user.dict()
+    })
+    
+    return updated_user
+```
+
+## WebSocket Manager (websocket_manager.py)
+
+1. Connection Management
+```python
+class WebSocketManager:
+    def __init__(self):
+        self.active_connections: Dict[int, List[WebSocket]] = {}
+        self.admin_connections: List[WebSocket] = []
+    
+    async def connect(self, websocket: WebSocket, user_id: int, is_admin: bool):
+        await websocket.accept()
+        
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = []
+        
+        self.active_connections[user_id].append(websocket)
+        
+        if is_admin:
+            self.admin_connections.append(websocket)
+    
+    async def disconnect(self, websocket: WebSocket, user_id: int, is_admin: bool):
+        if user_id in self.active_connections:
+            self.active_connections[user_id].remove(websocket)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+        
+        if is_admin and websocket in self.admin_connections:
+            self.admin_connections.remove(websocket)
+```
+
+2. Message Broadcasting
+```python
+class WebSocketManager:
+    async def broadcast_to_all(self, message: dict):
+        for connections in self.active_connections.values():
+            for websocket in connections:
+                try:
+                    await websocket.send_json(message)
+                except Exception as e:
+                    logger.error(f"Error broadcasting message: {e}")
+    
+    async def broadcast_to_user(self, user_id: int, message: dict):
+        if user_id in self.active_connections:
+            for websocket in self.active_connections[user_id]:
+                try:
+                    await websocket.send_json(message)
+                except Exception as e:
+                    logger.error(f"Error sending message to user {user_id}: {e}")
+    
+    async def broadcast_to_admins(self, message: dict):
+        for websocket in self.admin_connections:
+            try:
+                await websocket.send_json(message)
+            except Exception as e:
+                logger.error(f"Error sending message to admin: {e}")
+```
+
+## Database Triggers (triggers.py)
+
+1. Bug Report Triggers
+```python
+async def setup_bug_report_triggers():
+    await database.execute("""
+        CREATE TRIGGER bug_report_after_update
+        AFTER UPDATE ON bug_reports
+        FOR EACH ROW
+        EXECUTE FUNCTION notify_bug_report_update();
+    """)
+
+async def notify_bug_report_update():
+    # Get updated bug report
+    bug_report = await crud.get_bug_report(NEW.id)
+    
+    # Broadcast update
+    await websocket_manager.broadcast_to_all({
+        "type": "bug_report",
+        "action": "updated",
+        "payload": bug_report.dict()
+    })
+```
+
+## Error Handling (error_handlers.py)
+
+1. WebSocket Error Handler
+```python
+@app.exception_handler(WebSocketDisconnect)
+async def websocket_disconnect_handler(request: Request, exc: WebSocketDisconnect):
+    logger.info(f"WebSocket client disconnected: {exc.code}")
+    return None
+
+@app.exception_handler(WebSocketException)
+async def websocket_exception_handler(request: Request, exc: WebSocketException):
+    logger.error(f"WebSocket error: {exc}")
+    return None
+```
+
+## Authentication (auth.py)
+
+1. WebSocket Authentication
+```python
+async def get_current_user_ws(
+    websocket: WebSocket,
+    token: str = Query(None)
+):
+    if not token:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        raise WebSocketException("Missing authentication token")
+    
+    try:
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
+        )
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise WebSocketException("Invalid authentication token")
+        
+        return {
+            "user_id": user_id,
+            "is_admin": payload.get("is_admin", False)
+        }
+    except JWTError:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        raise WebSocketException("Invalid authentication token")
+```
+
+## Implementation Notes
+
+1. Database Integration:
+   - Use triggers for real-time updates
+   - Implement efficient querying
+   - Handle transaction rollbacks
+   - Maintain data consistency
+
+2. Error Handling:
+   - Log all errors
+   - Implement retry mechanism
+   - Handle disconnections gracefully
+   - Maintain message queue
+
+3. Security:
+   - Validate all messages
+   - Check permissions
+   - Rate limit connections
+   - Monitor suspicious activity
+
+4. Performance:
+   - Implement caching
+   - Batch updates
+   - Monitor connection count
+   - Handle backpressure
+
+5. Testing:
+   - Unit test all handlers
+   - Test concurrent updates
+   - Verify message delivery
+   - Test error scenarios 

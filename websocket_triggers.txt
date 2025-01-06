@@ -1,0 +1,234 @@
+# WebSocket Event Triggers
+
+## Bug Report Events
+
+1. Bug Report Created
+   - Trigger: After successful creation of a new bug report
+   - Event Type: "bug_report"
+   - Action: "created"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Update bug report list cache
+     * Send notification to assigned user
+     * Update project statistics
+
+2. Bug Report Updated
+   - Trigger: After any update to bug report fields
+   - Event Type: "bug_report"
+   - Action: "updated"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Update bug report cache
+     * Send notification if priority changed
+     * Update modified timestamp
+
+3. Bug Report Status Changed
+   - Trigger: When bug report status is changed
+   - Event Type: "bug_report"
+   - Action: "status_changed"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Update status in cache
+     * Send notification to creator and assignee
+     * Update project statistics
+     * Log status change
+
+4. Bug Report Assigned
+   - Trigger: When bug report is assigned to a user
+   - Event Type: "bug_report"
+   - Action: "assigned"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Update assignment in cache
+     * Send notification to assigned user
+     * Update user's assigned bugs count
+
+5. Bug Report Deleted
+   - Trigger: When bug report is deleted
+   - Event Type: "bug_report"
+   - Action: "deleted"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Remove from cache
+     * Update project statistics
+     * Clean up related comments
+
+## Comment Events
+
+1. Comment Added
+   - Trigger: After new comment is created
+   - Event Type: "comment"
+   - Action: "created"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Update comment cache
+     * Send notification to bug report subscribers
+     * Update comment count
+
+2. Comment Updated
+   - Trigger: When comment is edited
+   - Event Type: "comment"
+   - Action: "updated"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Update comment in cache
+     * Mark as edited
+     * Log modification
+
+3. Comment Deleted
+   - Trigger: When comment is deleted
+   - Event Type: "comment"
+   - Action: "deleted"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Remove from cache
+     * Update comment count
+     * Clean up notifications
+
+## Project Events
+
+1. Project Created
+   - Trigger: After new project is created
+   - Event Type: "project"
+   - Action: "created"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Update project list cache
+     * Initialize project statistics
+     * Log creation
+
+2. Project Updated
+   - Trigger: When project details are modified
+   - Event Type: "project"
+   - Action: "updated"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Update project cache
+     * Update modified timestamp
+     * Log changes
+
+3. Project Deleted
+   - Trigger: When project is deleted
+   - Event Type: "project"
+   - Action: "deleted"
+   - Notify: All connected clients
+   - Additional Actions:
+     * Remove from cache
+     * Archive related bug reports
+     * Clean up project data
+
+## User Events
+
+1. User Created
+   - Trigger: After new user registration
+   - Event Type: "user"
+   - Action: "created"
+   - Notify: Admin clients
+   - Additional Actions:
+     * Update user list cache
+     * Initialize user statistics
+     * Send welcome notification
+
+2. User Updated
+   - Trigger: When user profile is modified
+   - Event Type: "user"
+   - Action: "updated"
+   - Notify: Admin clients and affected user
+   - Additional Actions:
+     * Update user cache
+     * Log profile changes
+     * Update related data
+
+3. User Status Changed
+   - Trigger: When user status changes (active/inactive)
+   - Event Type: "user"
+   - Action: "status_changed"
+   - Notify: Admin clients
+   - Additional Actions:
+     * Update user status in cache
+     * Handle assigned bug reports
+     * Log status change
+
+4. User Deleted
+   - Trigger: When user account is deleted
+   - Event Type: "user"
+   - Action: "deleted"
+   - Notify: Admin clients
+   - Additional Actions:
+     * Remove from cache
+     * Reassign bug reports
+     * Archive user data
+
+## Notification Events
+
+1. Bug Assigned Notification
+   - Trigger: When bug is assigned to user
+   - Event Type: "notification"
+   - Action: "bug_assigned"
+   - Notify: Assigned user
+   - Additional Actions:
+     * Send email notification
+     * Send WhatsApp notification
+     * Update notification count
+
+2. Comment Added Notification
+   - Trigger: When new comment is added
+   - Event Type: "notification"
+   - Action: "comment_added"
+   - Notify: Bug report subscribers
+   - Additional Actions:
+     * Send email to subscribers
+     * Update notification count
+     * Log notification
+
+3. Status Changed Notification
+   - Trigger: When bug status changes
+   - Event Type: "notification"
+   - Action: "status_changed"
+   - Notify: Bug report subscribers
+   - Additional Actions:
+     * Send email to creator/assignee
+     * Update notification count
+     * Log status change
+
+4. Reminder Notification
+   - Trigger: When reminder is due
+   - Event Type: "notification"
+   - Action: "reminder_sent"
+   - Notify: Assigned user
+   - Additional Actions:
+     * Send email reminder
+     * Send WhatsApp reminder
+     * Schedule next reminder
+
+## Implementation Notes
+
+1. Database Triggers:
+   - Implement triggers for each event type
+   - Ensure atomic operations
+   - Handle transaction rollbacks
+   - Log trigger execution
+
+2. Error Handling:
+   - Implement retry mechanism
+   - Log failed notifications
+   - Handle offline clients
+   - Maintain event queue
+
+3. Performance:
+   - Batch similar events
+   - Implement rate limiting
+   - Cache frequently accessed data
+   - Monitor event throughput
+
+4. Security:
+   - Validate user permissions
+   - Sanitize event data
+   - Log security events
+   - Handle authentication
+
+5. Testing:
+   - Test all trigger conditions
+   - Verify notification delivery
+   - Test concurrent events
+   - Validate data consistency 

@@ -32,10 +32,11 @@ class BugDetailsDialog extends StatefulWidget {
 
 class _BugDetailsDialogState extends State<BugDetailsDialog> {
   final TextEditingController _commentController = TextEditingController();
-  Timer? _refreshTimer;
   List<Comment> _comments = [];
-  bool _isLoading = false;
+  bool _isLoadingComments = false;
+  bool _isSubmittingComment = false;
   Uint8List? _imageBytes;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
@@ -50,20 +51,19 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
 
   Future<void> _loadComments() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    setState(() => _isLoadingComments = true);
     try {
       final comments = await widget.bugReportService.getComments(widget.bug.id);
       if (mounted) {
         setState(() {
           _comments = comments;
-          _isLoading = false;
+          _isLoadingComments = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _isLoading = false;
-          // Show error in UI if comments fail to load
+          _isLoadingComments = false;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('Error loading comments: $e')),
           );
@@ -85,7 +85,7 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
     final comment = _commentController.text.trim();
     if (comment.isEmpty) return;
 
-    setState(() => _isLoading = true);
+    setState(() => _isSubmittingComment = true);
     try {
       await widget.bugReportService.addComment(
         widget.bug.id,
@@ -98,7 +98,10 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error adding comment: $e')),
         );
-        setState(() => _isLoading = false);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmittingComment = false);
       }
     }
   }
@@ -226,11 +229,27 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 8),
-          if (_isLoading)
-            const Center(child: CircularProgressIndicator())
+          const SizedBox(height: 16),
+          if (_isLoadingComments)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: CircularProgressIndicator(),
+              ),
+            )
           else if (_comments.isEmpty)
-            const Text('No comments yet')
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Text(
+                  'No comments yet',
+                  style: GoogleFonts.poppins(
+                    color: Colors.grey[600],
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            )
           else
             ListView.builder(
               shrinkWrap: true,
@@ -241,24 +260,42 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
                 return Card(
                   margin: const EdgeInsets.only(bottom: 8),
                   child: Padding(
-                    padding: const EdgeInsets.all(8),
+                    padding: const EdgeInsets.all(12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text(
-                              comment.userName,
-                              style: GoogleFonts.poppins(
-                                fontWeight: FontWeight.w600,
-                              ),
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 12,
+                                  backgroundColor: Colors.purple[100],
+                                  child: Text(
+                                    comment.userName[0].toUpperCase(),
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.purple[700],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  comment.userName,
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
                             ),
                             Text(
                               timeago.format(comment.createdAt),
                               style: GoogleFonts.poppins(
                                 fontSize: 12,
-                                color: Colors.grey,
+                                color: Colors.grey[600],
                               ),
                             ),
                           ],
@@ -266,7 +303,11 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
                         const SizedBox(height: 8),
                         Text(
                           comment.comment,
-                          style: GoogleFonts.poppins(),
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            color: Colors.grey[800],
+                            height: 1.5,
+                          ),
                         ),
                       ],
                     ),
@@ -291,17 +332,60 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
           Expanded(
             child: TextField(
               controller: _commentController,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 hintText: 'Add a comment...',
-                border: OutlineInputBorder(),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide(color: Colors.grey[300]!),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(24),
+                  borderSide: BorderSide(color: Colors.purple[300]!),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                filled: true,
+                fillColor: Colors.grey[50],
               ),
               maxLines: null,
             ),
           ),
           const SizedBox(width: 8),
-          IconButton(
-            icon: const Icon(Icons.send),
-            onPressed: _addComment,
+          Container(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.purple[400],
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _isSubmittingComment ? null : _addComment,
+                customBorder: const CircleBorder(),
+                child: Padding(
+                  padding: const EdgeInsets.all(10.0),
+                  child: _isSubmittingComment
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Icon(
+                          Icons.send,
+                          color: Colors.white,
+                          size: 24,
+                        ),
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -337,7 +421,9 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
           _buildDetailRow('Assigned To', widget.bug.recipient),
           _buildDetailRow('Project', widget.bug.projectName ?? 'No Project'),
           _buildDetailRow('Created', 
-            DateFormat('MMM d, h:mm a').format(widget.bug.modifiedDate)),
+            _getFormattedTime(widget.bug.modifiedDate)),
+          if (widget.tabUrl != null && widget.tabUrl!.isNotEmpty)
+            _buildDetailRow('URL', widget.tabUrl!),
         ],
       ),
     );
@@ -374,21 +460,12 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
     super.dispose();
   }
 
-  String _formatTimestamp(DateTime timestamp) {
-    final now = DateTime.now();
-    final localTimestamp = timestamp.toLocal();
-    final difference = now.difference(localTimestamp);
+  String _formatTime(DateTime time) {
+    // Format as IST date and time
+    return '${time.day.toString().padLeft(2, '0')}/${time.month.toString().padLeft(2, '0')}/${time.year} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
 
-    if (difference.inSeconds < 60) {
-      return 'Just now';
-    } else if (difference.inMinutes < 60) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inHours < 24) {
-      return '${difference.inHours}h ago';
-    } else if (difference.inDays < 7) {
-      return '${difference.inDays}d ago';
-    } else {
-      return DateFormat('MMM d, h:mm a').format(localTimestamp);
-    }
+  String _getFormattedTime(DateTime time) {
+    return _formatTime(time);
   }
 } 

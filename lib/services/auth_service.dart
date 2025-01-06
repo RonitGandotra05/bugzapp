@@ -16,11 +16,25 @@ class AuthService {
       );
 
       if (response.statusCode == 200) {
-        return json.decode(response.body);
+        final responseData = json.decode(response.body);
+        
+        // Ensure user_id is properly handled
+        if (responseData['user_id'] != null) {
+          if (responseData['user_id'] is String) {
+            responseData['user_id'] = int.tryParse(responseData['user_id']);
+          }
+        }
+        
+        return responseData;
       } else {
-        throw Exception('Failed to login: ${response.body}');
+        final errorBody = json.decode(response.body);
+        final errorMessage = errorBody['detail'] ?? errorBody['message'] ?? 'Invalid credentials';
+        throw Exception(errorMessage);
       }
     } catch (e) {
+      if (e is Exception) {
+        rethrow;
+      }
       throw Exception('Failed to connect to server: $e');
     }
   }
@@ -61,33 +75,12 @@ class AuthService {
     }
   }
 
+  Future<String?> getToken() async {
+    return TokenStorage.getToken();
+  }
+
   Future<void> logout() async {
-    try {
-      // Clear all stored data
-      await TokenStorage.clearAll();
-      
-      // Get token before clearing for server notification
-      final token = await TokenStorage.getToken();
-      
-      // Clear BugReportService cache
-      BugReportService().clearCache();
-      
-      // Attempt to notify the server about logout
-      if (token != null) {
-        try {
-          await http.post(
-            Uri.parse('${ApiConstants.baseUrl}/logout'),
-            headers: {
-              'Authorization': 'Bearer $token',
-            },
-          );
-        } catch (e) {
-          // Ignore server-side logout errors
-          print('Server logout failed: $e');
-        }
-      }
-    } catch (e) {
-      throw Exception('Failed to logout: $e');
-    }
+    await TokenStorage.clearToken();
+    BugReportService().clearCache();
   }
 } 

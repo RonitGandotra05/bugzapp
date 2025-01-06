@@ -50,9 +50,20 @@ class TokenStorage {
     return prefs.getBool(_isAdminKey) ?? false;
   }
 
-  static Future<void> saveUserId(int userId) async {
+  static Future<void> saveUserId(dynamic userId) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_userIdKey, userId);
+    if (userId == null) return;
+    
+    int? userIdInt;
+    if (userId is int) {
+      userIdInt = userId;
+    } else if (userId is String) {
+      userIdInt = int.tryParse(userId);
+    }
+    
+    if (userIdInt != null) {
+      await prefs.setInt(_userIdKey, userIdInt);
+    }
   }
 
   static Future<int?> getUserId() async {
@@ -76,5 +87,10 @@ class TokenStorage {
     final token = await getToken();  // This will handle expiry check
     final userId = await getUserId();
     return token != null && userId != null;
+  }
+
+  static Future<void> clearToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_tokenKey);
   }
 } 

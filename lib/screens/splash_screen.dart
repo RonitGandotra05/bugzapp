@@ -4,6 +4,7 @@ import 'home_screen.dart';
 import 'login_screen.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../widgets/bug_icon.dart';
+import '../services/bug_report_service.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -24,6 +25,13 @@ class _SplashScreenState extends State<SplashScreen> {
   Future<void> _checkAuth() async {
     await Future.delayed(const Duration(seconds: 2)); // Add a small delay for animation
     final isLoggedIn = await TokenStorage.isLoggedIn();
+    
+    if (isLoggedIn) {
+      // Load all comments before navigating to home screen
+      final bugReportService = BugReportService();
+      await bugReportService.loadAllComments();
+    }
+    
     if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(

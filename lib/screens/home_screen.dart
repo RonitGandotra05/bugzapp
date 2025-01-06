@@ -23,6 +23,7 @@ import 'dart:math' show pi;
 import 'package:universal_html/html.dart' as html;
 import '../widgets/custom_search_bar.dart';
 import 'package:http_parser/http_parser.dart';
+import '../services/auth_service.dart';
 
 enum BugFilter {
   all,
@@ -50,12 +51,14 @@ class BugFilterManager {
   final BugFilterType statusFilter;
   final User? currentUser;
   final String searchQuery;
+  final BugReportService bugReportService;
 
   BugFilterManager({
     required this.allBugs,
     required this.userFilter,
     required this.statusFilter,
     required this.currentUser,
+    required this.bugReportService,
     this.searchQuery = '',
   });
 
@@ -88,14 +91,22 @@ class BugFilterManager {
     if (searchQuery.isEmpty) return filteredByStatus;
     
     final searchLower = searchQuery.toLowerCase();
-    return filteredByStatus.where((bug) =>
-      bug.description.toLowerCase().contains(searchLower) ||
-      (bug.creator?.toLowerCase() ?? '').contains(searchLower) ||
-      (bug.recipient?.toLowerCase() ?? '').contains(searchLower) ||
-      bug.severityText.toLowerCase().contains(searchLower) ||
-      bug.statusText.toLowerCase().contains(searchLower) ||
-      (bug.projectName?.toLowerCase() ?? '').contains(searchLower)
-    ).toList();
+    return filteredByStatus.where((bug) {
+      // Get comments directly from cache
+      final comments = bugReportService.getCachedComments(bug.id);
+      final hasMatchingComment = comments.any((comment) =>
+        comment.comment.toLowerCase().contains(searchLower) ||
+        comment.userName.toLowerCase().contains(searchLower)
+      );
+
+      return bug.description.toLowerCase().contains(searchLower) ||
+        (bug.creator?.toLowerCase() ?? '').contains(searchLower) ||
+        (bug.recipient?.toLowerCase() ?? '').contains(searchLower) ||
+        bug.severityText.toLowerCase().contains(searchLower) ||
+        bug.statusText.toLowerCase().contains(searchLower) ||
+        (bug.projectName?.toLowerCase() ?? '').contains(searchLower) ||
+        hasMatchingComment;  // Include comments in search
+    }).toList();
   }
 
   // Stats calculations
@@ -149,8 +160,86 @@ class _HomeScreenState extends State<HomeScreen> {
       userFilter: _currentBugFilter,
       statusFilter: _currentFilter,
       currentUser: null,
+      bugReportService: _bugReportService,
     );
     _loadData();
+    _setupRealTimeUpdates();
+  }
+
+  void _setupRealTimeUpdates() {
+    // Listen for bug report updates
+    _bugReportService.bugReportStream.listen((bugReport) {
+      if (mounted) {
+        setState(() {
+          print('Received bug report update: ${bugReport.id} - ${bugReport.description}');
+          
+          // Update or add the bug report in the list
+          final index = _bugReports.indexWhere((b) => b.id == bugReport.id);
+          if (index != -1) {
+            _bugReports[index] = bugReport;
+            print('Updated existing bug report at index $index');
+          } else {
+            _bugReports.add(bugReport);
+            print('Added new bug report to list');
+          }
+          
+          // Sort the list to maintain order
+          _bugReports.sort((a, b) => 
+            _isAscendingOrder ? a.id.compareTo(b.id) : b.id.compareTo(a.id)
+          );
+          
+          // Update filter manager
+          _updateFilterManager();
+          
+          print('Current bug reports count: ${_bugReports.length}');
+          print('Filtered bug reports count: ${_filterManager.searchFiltered.length}');
+        });
+      }
+    });
+
+    // Listen for comment updates
+    _bugReportService.commentStream.listen((comment) {
+      if (mounted) {
+        setState(() {
+          print('Received comment update for bug ${comment.bugReportId}');
+        });
+      }
+    });
+
+    // Listen for project updates
+    _bugReportService.projectStream.listen((project) {
+      if (mounted) {
+        setState(() {
+          final index = _projects.indexWhere((p) => p.id == project.id);
+          if (index != -1) {
+            _projects[index] = project;
+          } else {
+            _projects.add(project);
+          }
+          _availableProjects = _projects; // Update available projects for bug creation
+        });
+      }
+    });
+
+    // Listen for user updates
+    _bugReportService.userStream.listen((user) {
+      if (mounted) {
+        setState(() {
+          final index = _users.indexWhere((u) => u.id == user.id);
+          if (index != -1) {
+            _users[index] = user;
+          } else {
+            _users.add(user);
+          }
+          _availableUsers = _users; // Update available users for bug assignment
+          
+          // Update current user if it's the same user
+          if (_currentUser?.id == user.id) {
+            _currentUser = user;
+          }
+        });
+      }
+    });
   }
 
   void _updateFilterManager() {
@@ -159,6 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
       userFilter: _currentBugFilter,
       statusFilter: _currentFilter,
       currentUser: _currentUser,
+      bugReportService: _bugReportService,
       searchQuery: _searchQuery,
     );
   }
@@ -192,23 +282,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
+    setState(() => _isLoading = true);
     try {
-      // Load current user first
       final currentUser = await _bugReportService.getCurrentUser();
-      if (currentUser == null) {
-        _handleLogout();
-        return;
-      }
-
-      print('Current user loaded in HomeScreen:');
-      print('  Name: ${currentUser.name}');
-      print('  Email: ${currentUser.email}');
-      print('  Is Admin: ${currentUser.isAdmin}');
-
       final users = await _bugReportService.fetchUsers();
       final projects = await _bugReportService.fetchProjects();
       final bugReports = await _bugReportService.getAllBugReports();
@@ -216,18 +292,16 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _currentUser = currentUser;
-          _userName = currentUser.name;
+          _userName = currentUser?.name ?? 'User';  // Set the user name
           _users = users;
           _projects = projects;
           _bugReports = bugReports;
-          _availableUsers = users;
-          _availableProjects = projects;
+          _bugReports.sort((a, b) => 
+            _isAscendingOrder ? a.id.compareTo(b.id) : b.id.compareTo(a.id)
+          );
           _isLoading = false;
+          _updateFilterManager();
         });
-
-        // Preload comments for visible bug reports
-        final visibleBugIds = _getVisibleBugIds();
-        await _bugReportService.preloadComments(visibleBugIds);
       }
     } catch (e) {
       print('Error loading data: $e');
@@ -235,9 +309,6 @@ class _HomeScreenState extends State<HomeScreen> {
         setState(() {
           _isLoading = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading data: $e')),
-        );
       }
     }
   }
@@ -359,7 +430,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildStatsPanel() {
     return StatsPanel(
-      userName: _userName.capitalize(),
+      userName: _userName.capitalize(),  // Use the stored user name
       totalBugs: _getTotalBugs(),
       resolvedBugs: _getResolvedBugs(),
       pendingBugs: _getPendingBugs(),
@@ -615,6 +686,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             onStatusToggle: () => _toggleBugStatus(bug.id),
                             onDelete: () => _deleteBugReport(bug.id),
                             onSendReminder: () => _sendReminder(bug.id),
+                            bugReportService: _bugReportService,
                           );
                         },
                       ),
@@ -644,572 +716,418 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _handleLogout() async {
-    await TokenStorage.deleteToken();
-    if (mounted) {
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const LoginScreen()),
-      );
+    try {
+      await AuthService().logout();  // This will clear all caches properly
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const LoginScreen()),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error during logout: $e')),
+        );
+      }
     }
   }
 
   Future<void> _showAddBugReport(BuildContext context) async {
     // Ensure data is loaded
-    if (_availableUsers.isEmpty) {
+    if (_users.isEmpty || _projects.isEmpty) {
       await _loadData();
     }
     
     final _formKey = GlobalKey<FormState>();
     String? _description;
-    Project? _selectedProject;
-    User? _selectedRecipient;
-    List<User> _selectedCCRecipients = [];
+    String? _selectedProjectId;
+    String? _selectedRecipientId;
+    List<String> _selectedCCRecipients = [];
     String _selectedSeverity = 'low';
     File? _selectedFile;
     String? _tabUrl;
+    bool _isSubmitting = false;
 
+    // Create a StatefulBuilder to manage dialog state
     await showDialog(
       context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          width: MediaQuery.of(context).size.width * 0.9,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Header
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Add Bug Report',
-                        style: GoogleFonts.poppins(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.black87,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () => Navigator.pop(context),
-                        color: Colors.grey[600],
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Description Field
-                  TextFormField(
-                    maxLines: 4,
-                    decoration: InputDecoration(
-                      labelText: 'Description',
-                      alignLabelWithHint: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.purple[300]!),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    validator: (value) =>
-                        value?.isEmpty ?? true ? 'Description is required' : null,
-                    onSaved: (value) => _description = value,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Project Dropdown
-                  DropdownButtonFormField<Project>(
-                    decoration: InputDecoration(
-                      labelText: 'Project',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.purple[300]!),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    items: _availableProjects.map((project) {
-                      return DropdownMenuItem(
-                        value: project,
-                        child: Text(project.name),
-                      );
-                    }).toList(),
-                    onChanged: (value) => _selectedProject = value,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Recipient Dropdown
-                  StatefulBuilder(
-                    builder: (context, setStateDialog) => Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Dialog(
+          backgroundColor: Colors.transparent,
+          child: Container(
+            width: MediaQuery.of(context).size.width * 0.9,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        DropdownButtonFormField<User>(
-                          decoration: InputDecoration(
-                            labelText: 'Recipient',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.grey[300]!),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: Colors.purple[300]!),
-                            ),
-                            filled: true,
-                            fillColor: Colors.grey[50],
+                        Text(
+                          'Add Bug Report',
+                          style: GoogleFonts.poppins(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.black87,
                           ),
-                          hint: Text('Select Recipient'),
-                          value: _selectedRecipient,
-                          items: _availableUsers.map((User user) {
-                            return DropdownMenuItem<User>(
-                              value: user,
-                              child: Text(
-                                user.name,
-                                style: GoogleFonts.poppins(fontSize: 14),
-                              ),
-                            );
-                          }).toList(),
-                          validator: (value) => value == null ? 'Please select a recipient' : null,
-                          onChanged: (User? value) {
-                            print('Selected User: ${value?.name} (ID: ${value?.id})');
-                            setStateDialog(() {
-                              _selectedRecipient = value;
-                            });
-                          },
                         ),
-                        if (_availableUsers.isEmpty && !_isLoading)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Text(
-                              'No users available',
-                              style: GoogleFonts.poppins(
-                                color: Colors.red[400],
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(context),
+                          color: Colors.grey[600],
+                        ),
                       ],
                     ),
-                  ),
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 24),
 
-                  // CC Recipients MultiSelect
-                  StatefulBuilder(
-                    builder: (context, setStateDialog) => Container(
+                    // Description TextField
+                    TextFormField(
+                      decoration: InputDecoration(
+                        labelText: 'Description',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.purple[300]!),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                      ),
+                      maxLines: 3,
+                      onChanged: (value) => _description = value,
+                      validator: (value) => value?.isEmpty ?? true ? 'Description is required' : null,
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Project Dropdown
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(
+                        labelText: 'Project',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.purple[300]!),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                      ),
+                      value: _selectedProjectId,
+                      items: _projects.map((project) {
+                        return DropdownMenuItem(
+                          value: project.id.toString(),
+                          child: Text(project.name),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedProjectId = value;
+                        });
+                      },
+                      validator: (value) => value == null ? 'Please select a project' : null,
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Recipient Dropdown
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(
+                        labelText: 'Recipient',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.purple[300]!),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                      ),
+                      value: _selectedRecipientId,
+                      items: _users.map((user) {
+                        return DropdownMenuItem(
+                          value: user.id.toString(),
+                          child: Text(user.name),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedRecipientId = value;
+                        });
+                      },
+                      validator: (value) => value == null ? 'Please select a recipient' : null,
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Severity Dropdown
+                    DropdownButtonFormField<String>(
+                      decoration: InputDecoration(
+                        labelText: 'Severity',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.purple[300]!),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                      ),
+                      value: _selectedSeverity,
+                      items: ['low', 'medium', 'high'].map((severity) {
+                        return DropdownMenuItem(
+                          value: severity,
+                          child: Text(
+                            severity.toUpperCase(),
+                            style: GoogleFonts.poppins(),
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedSeverity = value ?? 'low';
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Tab URL TextField
+                    TextFormField(
+                      decoration: InputDecoration(
+                        labelText: 'Tab URL (Optional)',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.grey[300]!),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.purple[300]!),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[50],
+                      ),
+                      onChanged: (value) => _tabUrl = value,
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Image Upload Button
+                    Container(
+                      width: double.infinity,
                       decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey[300]!),
                         borderRadius: BorderRadius.circular(12),
-                        color: Colors.grey[50],
                       ),
-                      padding: const EdgeInsets.all(12),
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            'CC Recipients (Max 4)',
-                            style: GoogleFonts.poppins(
-                              color: Colors.grey[600],
-                              fontSize: 12,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              // Selected Recipients Chips
-                              ..._selectedCCRecipients.map((user) => Chip(
-                                label: Text(
-                                  user.name,
-                                  style: GoogleFonts.poppins(fontSize: 12),
-                                ),
-                                deleteIcon: const Icon(Icons.close, size: 16),
-                                onDeleted: () {
-                                  setStateDialog(() {
-                                    _selectedCCRecipients.remove(user);
-                                  });
-                                },
-                              )),
-                              // Add Button (if limit not reached)
-                              if (_selectedCCRecipients.length < 4)
-                                ActionChip(
-                                  label: Text(
-                                    'Add',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.purple[400],
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  avatar: Icon(
-                                    Icons.add,
-                                    size: 16,
-                                    color: Colors.purple[400],
-                                  ),
-                                  backgroundColor: Colors.purple[50],
-                                  onPressed: () {
-                                    showDialog(
-                                      context: context,
-                                      builder: (context) => AlertDialog(
-                                        title: Text(
-                                          'Add CC Recipient',
-                                          style: GoogleFonts.poppins(),
-                                        ),
-                                        content: DropdownButtonFormField<User>(
-                                          decoration: InputDecoration(
-                                            labelText: 'Select User',
-                                            border: OutlineInputBorder(
-                                              borderRadius: BorderRadius.circular(12),
-                                            ),
-                                          ),
-                                          items: _availableUsers
-                                              .where((user) => !_selectedCCRecipients.contains(user))
-                                              .map((user) => DropdownMenuItem(
-                                                    value: user,
-                                                    child: Text(user.name),
-                                                  ))
-                                              .toList(),
-                                          onChanged: (user) {
-                                            if (user != null) {
-                                              setStateDialog(() {
-                                                _selectedCCRecipients.add(user);
-                                              });
-                                              Navigator.pop(context);
-                                            }
-                                          },
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Severity Dropdown
-                  DropdownButtonFormField<String>(
-                    decoration: InputDecoration(
-                      labelText: 'Severity',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.purple[300]!),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    value: _selectedSeverity,
-                    items: [
-                      {'display': 'Low', 'value': 'low'},
-                      {'display': 'Medium', 'value': 'medium'},
-                      {'display': 'High', 'value': 'high'},
-                    ].map((severity) {
-                      return DropdownMenuItem(
-                        value: severity['value'],
-                        child: Text(
-                          severity['display']!,
-                          style: GoogleFonts.poppins(),
-                        ),
-                      );
-                    }).toList(),
-                    onChanged: (value) => _selectedSeverity = value ?? 'low',
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Tab URL TextField
-                  TextFormField(
-                    decoration: InputDecoration(
-                      labelText: 'Tab URL (Optional)',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.grey[300]!),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.purple[300]!),
-                      ),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    onSaved: (value) => _tabUrl = value,
-                  ),
-                  const SizedBox(height: 20),
-
-                  // File Upload and Preview
-                  StatefulBuilder(
-                    builder: (context, setState) => Column(
-                      children: [
-                        Container(
-                          width: double.infinity,
-                          height: 100,
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey[300]!),
-                            borderRadius: BorderRadius.circular(12),
-                            color: Colors.grey[50],
-                          ),
-                          child: InkWell(
-                            onTap: () async {
-                              try {
-                                FilePickerResult? result = await FilePicker.platform.pickFiles(
-                                  type: FileType.image,
-                                  withData: true,  // This ensures we get the bytes on web
-                                );
-                                
-                                if (result != null) {
-                                  setState(() {
-                                    if (kIsWeb) {
-                                      _webImageBytes = result.files.first.bytes;
-                                      _selectedFile = null;
-                                    } else {
-                                      _selectedFile = File(result.files.first.path!);
-                                      _webImageBytes = null;
-                                    }
-                                  });
-                                }
-                              } catch (e) {
-                                print('Error picking file: $e');
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Error selecting image: $e')),
-                                );
-                              }
-                            },
-                            borderRadius: BorderRadius.circular(12),
+                          Padding(
+                            padding: const EdgeInsets.all(16.0),
                             child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
                                 Icon(
                                   Icons.cloud_upload_outlined,
-                                  size: 32,
-                                  color: Colors.purple[300],
+                                  size: 48,
+                                  color: Colors.purple[400],
                                 ),
                                 const SizedBox(height: 8),
                                 Text(
-                                  _selectedFile != null 
-                                      ? 'Image Selected'  // Generic text for both platforms
-                                      : 'Select Screenshot',
+                                  'Upload Screenshot (Optional)',
                                   style: GoogleFonts.poppins(
                                     color: Colors.grey[600],
+                                    fontSize: 14,
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                        ),
-                        if (_selectedFile != null || _webImageBytes != null) ...[
-                          const SizedBox(height: 16),
                           Container(
                             width: double.infinity,
-                            height: 200,
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.grey[300]!),
+                              color: Colors.grey[50],
+                              borderRadius: const BorderRadius.vertical(
+                                bottom: Radius.circular(12),
+                              ),
                             ),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                // Image preview
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: kIsWeb 
-                                      ? (_webImageBytes != null 
-                                          ? Image.memory(
-                                              _webImageBytes!,
-                                              fit: BoxFit.cover,
-                                            )
-                                          : Container())
-                                      : Image.file(
-                                          _selectedFile!,
-                                          fit: BoxFit.cover,
-                                        ),
+                            child: TextButton(
+                              onPressed: () async {
+                                try {
+                                  FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                    type: FileType.image,
+                                    allowMultiple: false,
+                                  );
+
+                                  if (result != null) {
+                                    setState(() {
+                                      if (kIsWeb) {
+                                        _webImageBytes = result.files.first.bytes;
+                                      } else {
+                                        _selectedFile = File(result.files.single.path!);
+                                      }
+                                    });
+                                  }
+                                } catch (e) {
+                                  print('Error picking file: $e');
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(content: Text('Error selecting image: $e')),
+                                  );
+                                }
+                              },
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: const RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.vertical(
+                                    bottom: Radius.circular(12),
+                                  ),
                                 ),
-                                // Remove button
-                                Positioned(
-                                  top: 8,
-                                  right: 8,
-                                  child: Material(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(20),
-                                    child: InkWell(
-                                      onTap: () => setState(() {
-                                        _selectedFile = null;
-                                        _webImageBytes = null;
-                                      }),
-                                      borderRadius: BorderRadius.circular(20),
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(8.0),
-                                        child: Icon(
-                                          Icons.close,
-                                          size: 20,
-                                          color: Colors.red[400],
-                                        ),
+                              ),
+                              child: Text(
+                                'Choose File',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.purple[400],
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ),
+                          if (_selectedFile != null || _webImageBytes != null)
+                            Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.check_circle,
+                                    color: Colors.green[400],
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Image selected',
+                                      style: GoogleFonts.poppins(
+                                        color: Colors.grey[600],
+                                        fontSize: 14,
                                       ),
                                     ),
                                   ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Action Buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
-                          child: Text(
-                            'Cancel',
-                            style: GoogleFonts.poppins(
-                              color: Colors.grey[600],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: StatefulBuilder(
-                          builder: (context, setSubmitState) => ElevatedButton(
-                            onPressed: _isSubmitting ? null : () async {
-                              if (_formKey.currentState?.validate() ?? false) {
-                                _formKey.currentState?.save();
-                                
-                                if (_selectedRecipient == null) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Please select a recipient')),
-                                  );
-                                  return;
-                                }
-
-                                setSubmitState(() {
-                                  _isSubmitting = true;
-                                });
-
-                                try {
-                                  print('Selected recipient: ${_selectedRecipient?.id}');
-                                  
-                                  await _bugReportService.uploadBugReport(
-                                    description: _description!,
-                                    recipientId: _selectedRecipient!.id.toString(),
-                                    ccRecipients: _selectedCCRecipients.map((user) => user.name).toList(),
-                                    imageFile: _selectedFile,
-                                    imageBytes: _webImageBytes,
-                                    severity: _selectedSeverity,
-                                    projectId: _selectedProject?.id.toString(),
-                                    tabUrl: _tabUrl,
-                                  );
-                                  
-                                  if (mounted) {
-                                    Navigator.pop(context);
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text('Bug report created successfully')),
-                                    );
-                                    _loadData();
-                                  }
-                                } catch (e) {
-                                  print('Error creating bug report: $e');
-                                  if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Error creating bug report: $e')),
-                                    );
-                                  }
-                                } finally {
-                                  if (mounted) {
-                                    setSubmitState(() {
-                                      _isSubmitting = false;
-                                    });
-                                  }
-                                }
-                              } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Please fill in all required fields')),
-                                );
-                              }
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.purple[400],
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
+                                  IconButton(
+                                    icon: const Icon(Icons.close),
+                                    onPressed: () {
+                                      setState(() {
+                                        _selectedFile = null;
+                                        _webImageBytes = null;
+                                      });
+                                    },
+                                    color: Colors.grey[600],
+                                    iconSize: 20,
+                                  ),
+                                ],
                               ),
                             ),
-                            child: _isSubmitting
-                                ? const SizedBox(
-                                    height: 20,
-                                    width: 20,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                    ),
-                                  )
-                                : Text(
-                                    'Submit',
-                                    style: GoogleFonts.poppins(
-                                      fontWeight: FontWeight.w500,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                          ),
-                        ),
+                        ],
                       ),
-                    ],
-                  ),
-                ],
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Submit Button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed: _isSubmitting
+                            ? null
+                            : () async {
+                                if (_formKey.currentState?.validate() ?? false) {
+                                  setState(() => _isSubmitting = true);
+                                  try {
+                                    await _bugReportService.uploadBugReport(
+                                      description: _description!,
+                                      recipientId: _selectedRecipientId!,
+                                      ccRecipients: [],
+                                      imageFile: _selectedFile,
+                                      imageBytes: _webImageBytes,
+                                      severity: _selectedSeverity,
+                                      projectId: _selectedProjectId,
+                                      tabUrl: _tabUrl ?? '',
+                                    );
+                                    
+                                    if (mounted) {
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Bug report created successfully')),
+                                      );
+                                      _loadData();
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(content: Text('Error creating bug report: $e')),
+                                      );
+                                    }
+                                  } finally {
+                                    if (mounted) {
+                                      setState(() => _isSubmitting = false);
+                                    }
+                                  }
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple[400],
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          elevation: 2,
+                        ),
+                        child: _isSubmitting
+                            ? const CircularProgressIndicator(
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              )
+                            : Text(
+                                'Submit Bug Report',
+                                style: GoogleFonts.poppins(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w500,
+                                  fontSize: 16,
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

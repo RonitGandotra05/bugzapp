@@ -1,0 +1,405 @@
+# WebSocket Events and Payloads
+
+## Event Format
+All WebSocket events follow this format:
+```json
+{
+    "type": "event_type",
+    "action": "action_name",
+    "payload": {
+        // Event-specific data
+    }
+}
+```
+
+## Bug Report Events
+
+1. Bug Report Created
+```json
+{
+    "type": "bug_report",
+    "action": "created",
+    "payload": {
+        "id": 123,
+        "title": "Bug Title",
+        "description": "Bug Description",
+        "status": "pending",
+        "priority": "high",
+        "creator_id": 456,
+        "assignee_id": 789,
+        "project_id": 101,
+        "created_at": "2024-01-20T10:30:00Z",
+        "updated_at": "2024-01-20T10:30:00Z"
+    }
+}
+```
+
+2. Bug Report Updated
+```json
+{
+    "type": "bug_report",
+    "action": "updated",
+    "payload": {
+        "id": 123,
+        "title": "Updated Bug Title",
+        "description": "Updated Description",
+        "status": "in_progress",
+        "priority": "critical",
+        "creator_id": 456,
+        "assignee_id": 789,
+        "project_id": 101,
+        "created_at": "2024-01-20T10:30:00Z",
+        "updated_at": "2024-01-20T11:45:00Z"
+    }
+}
+```
+
+3. Bug Report Status Changed
+```json
+{
+    "type": "bug_report",
+    "action": "status_changed",
+    "payload": {
+        "id": 123,
+        "title": "Bug Title",
+        "old_status": "pending",
+        "new_status": "resolved",
+        "changed_by": 789,
+        "updated_at": "2024-01-20T14:20:00Z"
+    }
+}
+```
+
+4. Bug Report Assigned
+```json
+{
+    "type": "bug_report",
+    "action": "assigned",
+    "payload": {
+        "id": 123,
+        "title": "Bug Title",
+        "assignee_id": 789,
+        "assigned_by": 456,
+        "updated_at": "2024-01-20T15:10:00Z"
+    }
+}
+```
+
+5. Bug Report Deleted
+```json
+{
+    "type": "bug_report",
+    "action": "deleted",
+    "payload": {
+        "id": 123,
+        "deleted_by": 456,
+        "deleted_at": "2024-01-20T16:05:00Z"
+    }
+}
+```
+
+## Comment Events
+
+1. Comment Created
+```json
+{
+    "type": "comment",
+    "action": "created",
+    "payload": {
+        "id": 234,
+        "bug_report_id": 123,
+        "user_id": 456,
+        "content": "Comment content",
+        "created_at": "2024-01-20T12:15:00Z",
+        "updated_at": "2024-01-20T12:15:00Z"
+    }
+}
+```
+
+2. Comment Updated
+```json
+{
+    "type": "comment",
+    "action": "updated",
+    "payload": {
+        "id": 234,
+        "bug_report_id": 123,
+        "user_id": 456,
+        "content": "Updated comment content",
+        "created_at": "2024-01-20T12:15:00Z",
+        "updated_at": "2024-01-20T13:20:00Z"
+    }
+}
+```
+
+3. Comment Deleted
+```json
+{
+    "type": "comment",
+    "action": "deleted",
+    "payload": {
+        "id": 234,
+        "bug_report_id": 123,
+        "deleted_by": 456,
+        "deleted_at": "2024-01-20T14:30:00Z"
+    }
+}
+```
+
+## Project Events
+
+1. Project Created
+```json
+{
+    "type": "project",
+    "action": "created",
+    "payload": {
+        "id": 101,
+        "name": "Project Name",
+        "description": "Project Description",
+        "created_by": 456,
+        "created_at": "2024-01-20T09:00:00Z",
+        "updated_at": "2024-01-20T09:00:00Z"
+    }
+}
+```
+
+2. Project Updated
+```json
+{
+    "type": "project",
+    "action": "updated",
+    "payload": {
+        "id": 101,
+        "name": "Updated Project Name",
+        "description": "Updated Description",
+        "updated_by": 456,
+        "created_at": "2024-01-20T09:00:00Z",
+        "updated_at": "2024-01-20T10:15:00Z"
+    }
+}
+```
+
+3. Project Deleted
+```json
+{
+    "type": "project",
+    "action": "deleted",
+    "payload": {
+        "id": 101,
+        "deleted_by": 456,
+        "deleted_at": "2024-01-20T11:30:00Z"
+    }
+}
+```
+
+## User Events
+
+1. User Created
+```json
+{
+    "type": "user",
+    "action": "created",
+    "payload": {
+        "id": 456,
+        "username": "john_doe",
+        "email": "john@example.com",
+        "role": "developer",
+        "status": "active",
+        "created_at": "2024-01-20T08:00:00Z"
+    }
+}
+```
+
+2. User Updated
+```json
+{
+    "type": "user",
+    "action": "updated",
+    "payload": {
+        "id": 456,
+        "username": "john_doe",
+        "email": "john.doe@example.com",
+        "role": "admin",
+        "status": "active",
+        "updated_at": "2024-01-20T09:30:00Z"
+    }
+}
+```
+
+3. User Status Changed
+```json
+{
+    "type": "user",
+    "action": "status_changed",
+    "payload": {
+        "id": 456,
+        "username": "john_doe",
+        "old_status": "active",
+        "new_status": "inactive",
+        "changed_by": 789,
+        "updated_at": "2024-01-20T10:45:00Z"
+    }
+}
+```
+
+## Notification Events
+
+1. Bug Assigned Notification
+```json
+{
+    "type": "notification",
+    "action": "bug_assigned",
+    "payload": {
+        "id": 345,
+        "user_id": 789,
+        "bug_report_id": 123,
+        "title": "Bug Title",
+        "message": "You have been assigned to bug: Bug Title",
+        "created_at": "2024-01-20T11:00:00Z"
+    }
+}
+```
+
+2. Comment Added Notification
+```json
+{
+    "type": "notification",
+    "action": "comment_added",
+    "payload": {
+        "id": 346,
+        "user_id": 456,
+        "bug_report_id": 123,
+        "comment_id": 234,
+        "title": "Bug Title",
+        "message": "New comment on bug: Bug Title",
+        "created_at": "2024-01-20T12:30:00Z"
+    }
+}
+```
+
+3. Status Changed Notification
+```json
+{
+    "type": "notification",
+    "action": "status_changed",
+    "payload": {
+        "id": 347,
+        "user_id": 456,
+        "bug_report_id": 123,
+        "title": "Bug Title",
+        "old_status": "pending",
+        "new_status": "resolved",
+        "message": "Bug status changed to: resolved",
+        "created_at": "2024-01-20T13:45:00Z"
+    }
+}
+```
+
+4. Reminder Notification
+```json
+{
+    "type": "notification",
+    "action": "reminder_sent",
+    "payload": {
+        "id": 348,
+        "user_id": 789,
+        "bug_report_id": 123,
+        "title": "Bug Title",
+        "message": "Reminder: Bug report pending for 3 days",
+        "created_at": "2024-01-20T14:00:00Z",
+        "next_reminder": "2024-01-23T14:00:00Z"
+    }
+}
+```
+
+## Error Events
+
+1. Authentication Error
+```json
+{
+    "type": "error",
+    "action": "auth_error",
+    "payload": {
+        "code": "invalid_token",
+        "message": "Invalid authentication token"
+    }
+}
+```
+
+2. Rate Limit Error
+```json
+{
+    "type": "error",
+    "action": "rate_limit",
+    "payload": {
+        "code": "rate_limit_exceeded",
+        "message": "Too many requests",
+        "retry_after": 60
+    }
+}
+```
+
+3. Validation Error
+```json
+{
+    "type": "error",
+    "action": "validation_error",
+    "payload": {
+        "code": "invalid_data",
+        "message": "Invalid request data",
+        "details": {
+            "field": "error_description"
+        }
+    }
+}
+```
+
+## System Events
+
+1. Connection Established
+```json
+{
+    "type": "system",
+    "action": "connected",
+    "payload": {
+        "user_id": 456,
+        "timestamp": "2024-01-20T08:00:00Z"
+    }
+}
+```
+
+2. Connection Closed
+```json
+{
+    "type": "system",
+    "action": "disconnected",
+    "payload": {
+        "user_id": 456,
+        "reason": "client_disconnect",
+        "timestamp": "2024-01-20T17:00:00Z"
+    }
+}
+```
+
+3. Ping
+```json
+{
+    "type": "system",
+    "action": "ping",
+    "payload": {
+        "timestamp": "2024-01-20T12:00:00Z"
+    }
+}
+```
+
+4. Pong
+```json
+{
+    "type": "system",
+    "action": "pong",
+    "payload": {
+        "timestamp": "2024-01-20T12:00:01Z"
+    }
+}
+``` 

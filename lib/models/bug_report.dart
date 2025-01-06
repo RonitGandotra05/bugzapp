@@ -47,22 +47,41 @@ class BugReport {
   });
 
   factory BugReport.fromJson(Map<String, dynamic> json) {
+    // Parse the modified_date string to DateTime in IST
+    DateTime? modifiedDate;
+    if (json['modified_date'] != null) {
+      // Parse UTC time and convert to IST by adding 5 hours and 30 minutes
+      modifiedDate = DateTime.parse(json['modified_date']).add(Duration(hours: 5, minutes: 30));
+    }
+
+    // Handle creator data
+    Map<String, dynamic>? creatorData = json['creator'] is Map ? json['creator'] as Map<String, dynamic> : null;
+    String? creator = creatorData?['name'] ?? json['creator']?.toString();
+
+    // Handle recipient data
+    Map<String, dynamic>? recipientData = json['recipient'] is Map ? json['recipient'] as Map<String, dynamic> : null;
+    String? recipient = recipientData?['name'] ?? json['recipient']?.toString();
+
+    // Handle project data
+    Map<String, dynamic>? projectData = json['project'] is Map ? json['project'] as Map<String, dynamic> : null;
+    String? projectName = projectData?['name'] ?? json['project_name']?.toString();
+
     return BugReport(
       id: json['id'] as int,
-      imageUrl: json['image_url'] as String?,
       description: json['description'] as String,
-      recipientId: json['recipient_id'] as int?,
-      creatorId: json['creator_id'] as int?,
+      imageUrl: json['image_url'] as String?,
       status: _parseStatus(json['status'] as String),
-      recipient: json['recipient'] as String?,
-      creator: json['creator'] as String?,
-      mediaType: json['media_type'] as String?,
-      modifiedDate: DateTime.parse(json['modified_date']),
       severity: _parseSeverity(json['severity'] as String),
-      projectId: json['project_id'] as int?,
-      projectName: json['project_name'] as String?,
+      creator: creator,
+      recipient: recipient,
+      mediaType: json['media_type'] as String?,
+      modifiedDate: modifiedDate ?? DateTime.now().add(Duration(hours: 5, minutes: 30)),
+      projectName: projectName,
       tabUrl: json['tab_url'] as String?,
-      ccRecipients: (json['cc_recipients'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [],
+      ccRecipients: (json['cc_recipients'] as List<dynamic>?)?.cast<String>() ?? [],
+      creatorId: creatorData?['id'] ?? json['creator_id'],
+      recipientId: recipientData?['id'] ?? json['recipient_id'],
+      projectId: projectData?['id'] ?? json['project_id'],
     );
   }
 
