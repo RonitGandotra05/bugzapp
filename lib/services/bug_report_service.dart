@@ -635,37 +635,69 @@ class BugReportService {
     }
   }
 
-  // Utility methods
-  Future<Map<String, String>> _getAuthHeaders() async {
-    final token = await TokenStorage.getToken();
-    if (token == null) {
-      return {
-        'Content-Type': 'application/json',
-      };
-    }
-    return {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer $token',
-    };
-  }
+  void _handleCommentEvent(String action, Map<String, dynamic> payload) {
+    try {
+      print('Handling comment event with action: $action');
+      print('Comment payload: $payload');
+      
+      // Extract the comment data from the correct location in payload
+      final commentData = payload['data'];
+      if (commentData == null) {
+        print('No comment data found in payload');
+        return;
+      }
 
-  Future<T> _throttledRequest<T>(String cacheKey, Future<T> Function() request) async {
-    if (_cache.containsKey(cacheKey) && 
-        _cacheExpiry[cacheKey]!.isAfter(DateTime.now())) {
-      return _cache[cacheKey] as T;
-    }
+      final comment = Comment.fromJson(commentData);
+      print('Successfully parsed comment: ${comment.id} - ${comment.comment}');
 
-    final result = await request();
-    _cache[cacheKey] = result;
-    _cacheExpiry[cacheKey] = DateTime.now().add(_cacheDuration);
-    return result;
+      switch (action) {
+        case 'comment_created':
+          print('Adding new comment to cache: ${comment.id}');
+          _addCommentToCache(comment);
+          _commentController.add(comment);
+          // Notify listeners about the new comment
+          print('Notified listeners about new comment');
+          break;
+        case 'comment_updated':
+          print('Updating comment in cache: ${comment.id}');
+          _updateCommentInCache(comment);
+          _commentController.add(comment);
+          break;
+        case 'comment_deleted':
+          print('Deleting comment from cache: ${comment.id}');
+          _deleteCommentFromCache(comment);
+          _commentController.add(comment);
+          break;
+      }
+
+      // After handling the event, refresh comments in background
+      loadAllComments().then((_) {
+        print('Comments refreshed after WebSocket event');
+      }).catchError((e) {
+        print('Error refreshing comments: $e');
+      });
+    } catch (e, stackTrace) {
+      print('Error handling comment event: $e');
+      print('Stack trace: $stackTrace');
+      print('Original payload: $payload');
+    }
   }
 
   void _addCommentToCache(Comment comment) {
     if (!_commentCache.containsKey(comment.bugReportId)) {
       _commentCache[comment.bugReportId] = [];
     }
-    _commentCache[comment.bugReportId]!.add(comment);
+    // Check if comment already exists
+    final existingIndex = _commentCache[comment.bugReportId]!.indexWhere((c) => c.id == comment.id);
+    if (existingIndex == -1) {
+      // Add only if it doesn't exist
+      _commentCache[comment.bugReportId]!.add(comment);
+      print('Added comment ${comment.id} to cache for bug ${comment.bugReportId}');
+    } else {
+      // Update existing comment
+      _commentCache[comment.bugReportId]![existingIndex] = comment;
+      print('Updated existing comment ${comment.id} in cache');
+    }
   }
 
   void _updateCommentInCache(Comment comment) {
@@ -696,29 +728,6 @@ class BugReportService {
     _commentCache.clear();
   }
 
-  void _handleCommentEvent(String action, Map<String, dynamic> payload) {
-    try {
-      final comment = Comment.fromJson(payload);
-      
-      switch (action) {
-        case 'created':
-          _addCommentToCache(comment);
-          _commentController.add(comment);
-          break;
-        case 'updated':
-          _updateCommentInCache(comment);
-          _commentController.add(comment);
-          break;
-        case 'deleted':
-          _deleteCommentFromCache(comment);
-          _commentController.add(comment);
-          break;
-      }
-    } catch (e) {
-      print('Error handling comment event: $e');
-    }
-  }
-
   void _handleProjectEvent(String action, Map<String, dynamic> payload) {
     try {
       final project = Project.fromJson(payload);
@@ -735,5 +744,31 @@ class BugReportService {
     } catch (e) {
       print('Error handling user event: $e');
     }
+  }
+
+  // Utility methods
+  Future<Map<String, String>> _getAuthHeaders() async {
+    final token = await TokenStorage.getToken();
+    if (token == null) {
+      return {
+        'Content-Type': 'application/json',
+      };
+    }
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
+  Future<T> _throttledRequest<T>(String cacheKey, Future<T> Function() request) async {
+    if (_cache.containsKey(cacheKey) && 
+        _cacheExpiry[cacheKey]!.isAfter(DateTime.now())) {
+      return _cache[cacheKey] as T;
+    }
+
+    final result = await request();
+    _cache[cacheKey] = result;
+    _cacheExpiry[cacheKey] = DateTime.now().add(_cacheDuration);
+    return result;
   }
 } 
