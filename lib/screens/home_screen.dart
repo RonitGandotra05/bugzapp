@@ -24,6 +24,7 @@ import 'package:universal_html/html.dart' as html;
 import '../widgets/custom_search_bar.dart';
 import 'package:http_parser/http_parser.dart';
 import '../services/auth_service.dart';
+import 'package:image_picker/image_picker.dart';
 
 enum BugFilter {
   all,
@@ -425,6 +426,41 @@ class _HomeScreenState extends State<HomeScreen> {
           SnackBar(content: Text('Error uploading bug report: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _takePicture() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? photo = await picker.pickImage(source: ImageSource.camera);
+      
+      if (photo != null) {
+        if (kIsWeb) {
+          final bytes = await photo.readAsBytes();
+          setState(() {
+            _webImageBytes = bytes;
+          });
+        } else {
+          setState(() {
+            _imageFile = File(photo.path);
+          });
+        }
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Photo captured successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error taking picture: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error capturing photo: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -984,7 +1020,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     const SizedBox(height: 20),
 
-                    // Image Upload Button
+                    // Image Upload Section
                     Container(
                       width: double.infinity,
                       decoration: BoxDecoration(
@@ -995,71 +1031,81 @@ class _HomeScreenState extends State<HomeScreen> {
                         children: [
                           Padding(
                             padding: const EdgeInsets.all(16.0),
-                            child: Column(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(
-                                  Icons.cloud_upload_outlined,
-                                  size: 48,
-                                  color: Colors.purple[400],
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(
+                                          Icons.camera_alt,
+                                          size: 48,
+                                          color: Colors.purple[400],
+                                        ),
+                                        onPressed: _takePicture,
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Take Photo',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.grey[600],
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  'Upload Screenshot (Optional)',
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.grey[600],
-                                    fontSize: 14,
+                                Container(
+                                  height: 80,
+                                  width: 1,
+                                  color: Colors.grey[300],
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(
+                                          Icons.photo_library,
+                                          size: 48,
+                                          color: Colors.purple[400],
+                                        ),
+                                        onPressed: () async {
+                                          try {
+                                            FilePickerResult? result = await FilePicker.platform.pickFiles(
+                                              type: FileType.image,
+                                              allowMultiple: false,
+                                            );
+
+                                            if (result != null) {
+                                              setState(() {
+                                                if (kIsWeb) {
+                                                  _webImageBytes = result.files.first.bytes;
+                                                } else {
+                                                  _selectedFile = File(result.files.single.path!);
+                                                }
+                                              });
+                                            }
+                                          } catch (e) {
+                                            print('Error picking file: $e');
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              SnackBar(content: Text('Error selecting image: $e')),
+                                            );
+                                          }
+                                        },
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Choose from Gallery',
+                                        style: GoogleFonts.poppins(
+                                          color: Colors.grey[600],
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ],
-                            ),
-                          ),
-                          Container(
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: Colors.grey[50],
-                              borderRadius: const BorderRadius.vertical(
-                                bottom: Radius.circular(12),
-                              ),
-                            ),
-                            child: TextButton(
-                              onPressed: () async {
-                                try {
-                                  FilePickerResult? result = await FilePicker.platform.pickFiles(
-                                    type: FileType.image,
-                                    allowMultiple: false,
-                                  );
-
-                                  if (result != null) {
-                                    setState(() {
-                                      if (kIsWeb) {
-                                        _webImageBytes = result.files.first.bytes;
-                                      } else {
-                                        _selectedFile = File(result.files.single.path!);
-                                      }
-                                    });
-                                  }
-                                } catch (e) {
-                                  print('Error picking file: $e');
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(content: Text('Error selecting image: $e')),
-                                  );
-                                }
-                              },
-                              style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(vertical: 16),
-                                shape: const RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.vertical(
-                                    bottom: Radius.circular(12),
-                                  ),
-                                ),
-                              ),
-                              child: Text(
-                                'Choose File',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.purple[400],
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
                             ),
                           ),
                           if (_selectedFile != null || _webImageBytes != null)
@@ -1155,7 +1201,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                               )
                             : Text(
-                                'Submit Bug Report',
+                                'Submit',
                                 style: GoogleFonts.poppins(
                                   color: Colors.white,
                                   fontWeight: FontWeight.w500,
