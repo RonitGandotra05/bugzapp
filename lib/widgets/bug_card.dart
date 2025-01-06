@@ -264,6 +264,18 @@ class _BugCardState extends State<BugCard> {
     super.initState();
     // Load comments immediately when card is created
     _loadComments();
+    
+    // Listen for comment updates
+    widget.bugReportService.commentStream.listen((comment) {
+      if (comment.bugReportId == widget.bug.id) {
+        // Update the local comments list from cache
+        if (mounted) {
+          setState(() {
+            _comments = widget.bugReportService.getCachedComments(widget.bug.id);
+          });
+        }
+      }
+    });
   }
 
   @override
@@ -586,14 +598,14 @@ class _BugCardState extends State<BugCard> {
     });
 
     try {
-      // Get comments directly from cache
-      final comments = widget.bugReportService.getCachedComments(widget.bug.id);
+      final comments = await widget.bugReportService.getComments(widget.bug.id);
       if (mounted) {
         setState(() {
           _comments = comments;
           _commentsLoaded = true;
           _isLoadingComments = false;
         });
+        print('Loaded ${comments.length} comments for bug ${widget.bug.id}');
       }
     } catch (e) {
       if (mounted) {
@@ -601,6 +613,7 @@ class _BugCardState extends State<BugCard> {
           _isLoadingComments = false;
           _commentsLoaded = true;
         });
+        print('Error loading comments: $e');
       }
     }
   }

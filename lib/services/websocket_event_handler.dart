@@ -53,6 +53,7 @@ class WebSocketEventHandler {
           _handleBugReportEvent(action, payload);
           break;
         case 'comment':
+          final action = payload['event'];
           _handleCommentEvent(action, payload);
           break;
         case 'project':

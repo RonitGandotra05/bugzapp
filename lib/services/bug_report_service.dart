@@ -191,16 +191,9 @@ class BugReportService {
   }
 
   Future<List<Comment>> getComments(int bugId) async {
-    if (!_commentCache.containsKey(bugId)) {
-      final response = await http.get(
-        Uri.parse('${ApiConstants.baseUrl}${ApiConstants.bugReportsEndpoint}/$bugId/comments'),
-        headers: await _getAuthHeaders(),
-      );
-
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        _commentCache[bugId] = data.map((json) => Comment.fromJson(json)).toList();
-      }
+    // If we haven't loaded all comments yet, do it first
+    if (!_initialCommentsFetched) {
+      await loadAllComments();
     }
     return _commentCache[bugId] ?? [];
   }
@@ -605,29 +598,54 @@ class BugReportService {
   }
 
   // Comment Management Methods
+  final Set<int> _processedCommentIds = {};  // Track processed comment IDs
+  DateTime? _lastCommentRefresh;  // Track last refresh time
+  static const _commentRefreshThreshold = Duration(seconds: 5);  // Minimum time between refreshes
+
   Future<void> loadAllComments() async {
+    // Check if we've refreshed recently
+    if (_lastCommentRefresh != null && 
+        DateTime.now().difference(_lastCommentRefresh!) < _commentRefreshThreshold) {
+      print('Skipping refresh - too soon since last refresh');
+      return;
+    }
+
     try {
       final response = await _dio.get(
         '${ApiConstants.baseUrl}/all_comments',
-        options: Options(
-          headers: await _getAuthHeaders(),
-          validateStatus: (status) => status! < 500,
-        ),
+        options: Options(headers: await _getAuthHeaders()),
       );
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = response.data;
+        print('Received comments response: ${response.data}');
         
+        // Clear existing cache
         _commentCache.clear();
-        for (var commentJson in data) {
-          final comment = Comment.fromJson(commentJson);
-          _addCommentToCache(comment);
+        
+        // Process all comments
+        List<dynamic> commentsData;
+        if (response.data is String) {
+          commentsData = jsonDecode(response.data as String);
+        } else {
+          commentsData = response.data as List<dynamic>;
+        }
+        
+        for (var commentJson in commentsData) {
+          try {
+            final comment = Comment.fromJson(commentJson);
+            if (!_commentCache.containsKey(comment.bugReportId)) {
+              _commentCache[comment.bugReportId] = [];
+            }
+            _commentCache[comment.bugReportId]!.add(comment);
+            _processedCommentIds.add(comment.id);  // Track all comment IDs
+          } catch (e) {
+            print('Error processing comment: $e');
+          }
         }
         
         _initialCommentsFetched = true;
-      } else {
-        final errorDetail = response.data is Map ? response.data['detail'] : response.statusMessage;
-        throw Exception('Failed to load comments: $errorDetail');
+        _lastCommentRefresh = DateTime.now();
+        print('Successfully loaded ${commentsData.length} comments');
       }
     } catch (e) {
       print('Error loading all comments: $e');
@@ -638,41 +656,38 @@ class BugReportService {
   void _handleCommentEvent(String action, Map<String, dynamic> payload) {
     try {
       print('Handling comment event with action: $action');
-      print('Comment payload: $payload');
       
       // Extract the comment data from the correct location in payload
-      final commentData = payload['data'];
+      final commentData = payload['data'] ?? payload['comment'] ?? payload;
       if (commentData == null) {
         print('No comment data found in payload');
         return;
       }
 
       final comment = Comment.fromJson(commentData);
-      print('Successfully parsed comment: ${comment.id} - ${comment.comment}');
+      print('Processing comment: ${comment.id} - ${comment.comment}');
 
-      switch (action) {
-        case 'comment_created':
-          print('Adding new comment to cache: ${comment.id}');
-          _addCommentToCache(comment);
-          _commentController.add(comment);
-          // Notify listeners about the new comment
-          print('Notified listeners about new comment');
-          break;
-        case 'comment_updated':
-          print('Updating comment in cache: ${comment.id}');
-          _updateCommentInCache(comment);
-          _commentController.add(comment);
-          break;
-        case 'comment_deleted':
-          print('Deleting comment from cache: ${comment.id}');
-          _deleteCommentFromCache(comment);
-          _commentController.add(comment);
-          break;
+      // Check if we've already processed this comment ID
+      if (_processedCommentIds.contains(comment.id)) {
+        print('Comment ${comment.id} already processed, skipping refresh');
+        return;
       }
 
-      // After handling the event, refresh comments in background
+      // Add to processed set
+      _processedCommentIds.add(comment.id);
+
+      // For any comment event, refresh all comments once
       loadAllComments().then((_) {
-        print('Comments refreshed after WebSocket event');
+        // Notify listeners of the specific bug's comments
+        if (_commentCache.containsKey(comment.bugReportId)) {
+          final comments = _commentCache[comment.bugReportId]!;
+          // Sort comments by creation date (newest first)
+          comments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          // Notify listeners
+          for (var comment in comments) {
+            _commentController.add(comment);
+          }
+        }
       }).catchError((e) {
         print('Error refreshing comments: $e');
       });
@@ -693,10 +708,14 @@ class BugReportService {
       // Add only if it doesn't exist
       _commentCache[comment.bugReportId]!.add(comment);
       print('Added comment ${comment.id} to cache for bug ${comment.bugReportId}');
+      // Notify listeners about the new comment
+      _commentController.add(comment);
     } else {
       // Update existing comment
       _commentCache[comment.bugReportId]![existingIndex] = comment;
       print('Updated existing comment ${comment.id} in cache');
+      // Notify listeners about the updated comment
+      _commentController.add(comment);
     }
   }
 
@@ -726,6 +745,8 @@ class BugReportService {
     _cache.remove('created_bugs');
     _cache.remove('assigned_bugs');
     _commentCache.clear();
+    _processedCommentIds.clear();
+    _lastCommentRefresh = null;
   }
 
   void _handleProjectEvent(String action, Map<String, dynamic> payload) {
