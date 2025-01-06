@@ -390,13 +390,22 @@ class BugReportService {
   }
 
   Future<void> toggleAdminStatus(int userId) async {
-    final response = await http.post(
-      Uri.parse('${ApiConstants.baseUrl}/users/$userId/toggle-admin'),
-      headers: await _getAuthHeaders(),
-    );
+    try {
+      final response = await _dio.put(
+        '${ApiConstants.baseUrl}/users/$userId/toggle_admin',
+        options: Options(
+          headers: await _getAuthHeaders(),
+          validateStatus: (status) => status! < 500,
+        ),
+      );
 
-    if (response.statusCode != 200) {
-      throw Exception('Failed to toggle admin status');
+      if (response.statusCode != 200) {
+        final errorDetail = response.data is Map ? response.data['detail'] : response.statusMessage;
+        throw Exception('Failed to toggle admin status: $errorDetail');
+      }
+    } catch (e) {
+      print('Error in toggleAdminStatus: $e');
+      rethrow;
     }
   }
 

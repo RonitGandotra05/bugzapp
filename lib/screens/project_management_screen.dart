@@ -26,6 +26,9 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
   bool _sortAscending = false;
   final PageController _pageController = PageController();
   bool _isAdmin = false;
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
 
   @override
   void dispose() {
@@ -83,103 +86,137 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
     }
   }
 
-  Future<void> _showAddProjectDialog() async {
-    final nameController = TextEditingController();
-    final descriptionController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-
-    await showDialog(
+  Future<void> _showCreateProjectDialog() async {
+    bool isLoading = false;
+    return showDialog(
       context: context,
-      builder: (context) => Dialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          child: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Create New Project',
-                  style: GoogleFonts.poppins(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                TextFormField(
-                  controller: nameController,
-                  decoration: InputDecoration(
-                    labelText: 'Project Name',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => Dialog(
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Create New Project',
+                    style: GoogleFonts.poppins(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
                     ),
-                    prefixIcon: Icon(Icons.folder),
                   ),
-                  validator: (value) => value?.isEmpty ?? true ? 'Project name is required' : null,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: descriptionController,
-                  decoration: InputDecoration(
-                    labelText: 'Description',
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                  const SizedBox(height: 20),
+                  TextFormField(
+                    controller: _nameController,
+                    decoration: InputDecoration(
+                      labelText: 'Project Name',
+                      prefixIcon: Icon(Icons.folder_outlined),
                     ),
-                    prefixIcon: Icon(Icons.description),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter a project name';
+                      }
+                      return null;
+                    },
                   ),
-                  maxLines: 3,
-                  validator: (value) => value?.isEmpty ?? true ? 'Description is required' : null,
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: Text('Cancel'),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    controller: _descriptionController,
+                    decoration: InputDecoration(
+                      labelText: 'Description',
+                      prefixIcon: Icon(Icons.description_outlined),
                     ),
-                    const SizedBox(width: 16),
-                    ElevatedButton(
-                      onPressed: () async {
-                        if (formKey.currentState?.validate() ?? false) {
-                          try {
-                            await _bugReportService.createProject(
-                              name: nameController.text.trim(),
-                              description: descriptionController.text.trim(),
-                            );
-                            Navigator.pop(context);
-                            _loadProjects();
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Project created successfully')),
-                            );
-                          } catch (e) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error creating project: $e')),
-                            );
-                          }
-                        }
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.purple[400],
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                    validator: (value) {
+                      if (value == null || value.isEmpty) {
+                        return 'Please enter a description';
+                      }
+                      return null;
+                    },
+                    maxLines: 3,
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: isLoading ? null : () => Navigator.pop(context),
+                        child: Text(
+                          'Cancel',
+                          style: GoogleFonts.poppins(),
                         ),
                       ),
-                      child: Text(
-                        'Create',
-                        style: GoogleFonts.poppins(
-                          fontWeight: FontWeight.w600,
+                      const SizedBox(width: 10),
+                      ElevatedButton(
+                        onPressed: isLoading
+                            ? null
+                            : () async {
+                                if (_formKey.currentState!.validate()) {
+                                  setState(() => isLoading = true);
+                                  try {
+                                    await _bugReportService.createProject(
+                                      name: _nameController.text,
+                                      description: _descriptionController.text,
+                                    );
+                                    if (mounted) {
+                                      Navigator.pop(context);
+                                      // Clear form
+                                      _nameController.clear();
+                                      _descriptionController.clear();
+                                      // Refresh project list
+                                      await _loadProjects();
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Project created successfully'),
+                                          backgroundColor: Colors.purple[400],
+                                        ),
+                                      );
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text('Failed to create project: $e'),
+                                          backgroundColor: Colors.red,
+                                        ),
+                                      );
+                                    }
+                                  } finally {
+                                    if (mounted) {
+                                      setState(() => isLoading = false);
+                                    }
+                                  }
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.purple[400],
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
+                        child: isLoading
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : Text(
+                                'Create',
+                                style: GoogleFonts.poppins(
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.white,
+                                ),
+                              ),
                       ),
-                    ),
-                  ],
-                ),
-              ],
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -187,84 +224,105 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
     );
   }
 
-  Future<void> _showDeleteConfirmation(Project project) async {
+  Future<void> _showDeleteConfirmationDialog(Project project) async {
+    bool isDeleting = false;
     return showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        title: Text(
-          'Delete Project',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.bold,
-            color: Colors.red[700],
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Are you sure you want to delete ${project.name}?',
-              style: GoogleFonts.poppins(),
+          title: Text(
+            'Delete Project',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
+              color: Colors.red[700],
             ),
-            const SizedBox(height: 8),
-            Text(
-              'This action cannot be undone. All bug reports will be unassigned from this project.',
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                color: Colors.grey[600],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Are you sure you want to delete ${project.name}?',
+                style: GoogleFonts.poppins(),
               ),
+              const SizedBox(height: 8),
+              Text(
+                'This action cannot be undone. All associated bug reports will be affected.',
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isDeleting ? null : () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.poppins(),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: isDeleting
+                  ? null
+                  : () async {
+                      setState(() => isDeleting = true);
+                      try {
+                        await _bugReportService.deleteProject(project.id);
+                        if (mounted) {
+                          Navigator.pop(context);
+                          // Refresh project list
+                          await _loadProjects();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('${project.name} has been deleted'),
+                              backgroundColor: Colors.red[400],
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Error deleting project: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() => isDeleting = false);
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red[400],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: isDeleting
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text(
+                      'Delete',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.poppins(),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                await _bugReportService.deleteProject(project.id);
-                Navigator.pop(context);
-                _loadProjects();
-                setState(() {
-                  if (_selectedProject?.id == project.id) {
-                    _selectedProject = null;
-                    _projectBugReports = [];
-                  }
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text('${project.name} has been deleted'),
-                    backgroundColor: Colors.red[400],
-                  ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error deleting project: $e')),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red[400],
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(
-              'Delete',
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -333,7 +391,7 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
                                 Icons.delete_outline,
                                 color: Colors.red[400],
                               ),
-                              onPressed: () => _showDeleteConfirmation(project),
+                              onPressed: () => _showDeleteConfirmationDialog(project),
                               tooltip: 'Delete Project',
                             )
                           : null,
@@ -344,7 +402,7 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
             ),
       floatingActionButton: _isAdmin
           ? FloatingActionButton(
-              onPressed: _showAddProjectDialog,
+              onPressed: _showCreateProjectDialog,
               child: const Icon(Icons.add),
               backgroundColor: Colors.purple[400],
             )

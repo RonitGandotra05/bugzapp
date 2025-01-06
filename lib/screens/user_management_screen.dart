@@ -217,67 +217,106 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   }
 
   Future<void> _showAdminConfirmationDialog(User user) async {
+    bool isLoading = false;
     return showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
-        ),
-        title: Text(
-          user.isAdmin ? 'Remove Admin Rights' : 'Make Admin',
-          style: GoogleFonts.poppins(
-            fontWeight: FontWeight.bold,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
           ),
-        ),
-        content: Text(
-          user.isAdmin
-              ? 'Are you sure you want to remove admin rights from ${user.name}?'
-              : 'Are you sure you want to make ${user.name} an admin?',
-          style: GoogleFonts.poppins(),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.poppins(),
+          title: Text(
+            user.isAdmin ? 'Remove Admin Rights' : 'Make Admin',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.bold,
             ),
           ),
-          ElevatedButton(
-            onPressed: () async {
-              try {
-                await _bugReportService.toggleAdminStatus(user.id);
-                Navigator.pop(context);
-                _loadUsers(); // Refresh user list
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      user.isAdmin
-                          ? '${user.name} is no longer an admin'
-                          : '${user.name} is now an admin',
+          content: Text(
+            user.isAdmin
+                ? 'Are you sure you want to remove admin rights from ${user.name}?'
+                : 'Are you sure you want to make ${user.name} an admin?',
+            style: GoogleFonts.poppins(),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isLoading ? null : () => Navigator.pop(context),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.poppins(),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: isLoading
+                  ? null
+                  : () async {
+                      setState(() => isLoading = true);
+                      try {
+                        await _bugReportService.toggleAdminStatus(user.id);
+                        // Update local state immediately
+                        if (mounted) {
+                          this.setState(() {
+                            final userIndex = _users.indexWhere((u) => u.id == user.id);
+                            if (userIndex != -1) {
+                              _users[userIndex] = _users[userIndex].copyWith(
+                                isAdmin: !user.isAdmin,
+                              );
+                            }
+                          });
+                        }
+                        Navigator.pop(context);
+                        // Refresh from server
+                        await _loadUsers();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                user.isAdmin
+                                    ? '${user.name} is no longer an admin'
+                                    : '${user.name} is now an admin',
+                              ),
+                              backgroundColor: Colors.purple[400],
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Error updating admin status: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() => isLoading = false);
+                        }
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple[400],
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: isLoading
+                  ? SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text(
+                      'Confirm',
+                      style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
-                  ),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error updating admin status: $e')),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple[400],
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
             ),
-            child: Text(
-              'Confirm',
-              style: GoogleFonts.poppins(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
