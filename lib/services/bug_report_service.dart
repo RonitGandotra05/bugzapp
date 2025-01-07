@@ -459,49 +459,47 @@ class BugReportService {
       orElse: () => throw Exception('Recipient user not found'),
     );
 
-    // Build form data with required fields
-    final Map<String, dynamic> formFields = {
-      'description': description,
-      'recipient_name': recipientUser.name,
-      'severity': severity,
-    };
-
-    // Add optional fields only if they have values
-    if (projectId != null) {
-      formFields['project_id'] = int.parse(projectId);
-    }
-    if (tabUrl != null && tabUrl.isNotEmpty) {
-      formFields['tab_url'] = tabUrl;
-    }
-
-    final formData = FormData.fromMap(formFields);
-    
-    // Add file if provided (optional)
-    if (imageFile != null) {
-      formData.files.add(
-        MapEntry(
-          'file',
-          await MultipartFile.fromFile(
-            imageFile.path,
-            filename: 'screenshot.png',
-            contentType: MediaType('image', 'png'),
-          ),
-        ),
-      );
-    } else if (imageBytes != null) {
-      formData.files.add(
-        MapEntry(
-          'file',
-          MultipartFile.fromBytes(
-            imageBytes,
-            filename: 'screenshot.png',
-            contentType: MediaType('image', 'png'),
-          ),
-        ),
-      );
-    }
-
     try {
+      // Build form data with required fields
+      final formData = FormData.fromMap({
+        'description': description,
+        'recipient_name': recipientUser.name,
+        'severity': severity,
+        if (projectId != null) 'project_id': int.parse(projectId),
+        if (tabUrl != null && tabUrl.isNotEmpty) 'tab_url': tabUrl,
+        if (ccRecipients != null && ccRecipients.isNotEmpty) 
+          'cc_recipients': ccRecipients.join(','),
+      });
+
+      // Handle file upload
+      if (imageFile != null || imageBytes != null) {
+        if (imageFile != null) {
+          formData.files.add(
+            MapEntry(
+              'file',
+              await MultipartFile.fromFile(
+                imageFile.path,
+                filename: 'screenshot.png',
+                contentType: MediaType('image', 'png'),
+              ),
+            ),
+          );
+        } else if (imageBytes != null) {
+          formData.files.add(
+            MapEntry(
+              'file',
+              MultipartFile.fromBytes(
+                imageBytes,
+                filename: 'screenshot.png',
+                contentType: MediaType('image', 'png'),
+              ),
+            ),
+          );
+        }
+      } else {
+        throw Exception('Image file is required');
+      }
+
       final response = await _dio.post(
         '${ApiConstants.baseUrl}/upload',
         data: formData,
