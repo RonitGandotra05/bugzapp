@@ -28,6 +28,9 @@ dependencies:
   web_socket_channel: ^2.4.0
   async: ^2.11.0
   json_annotation: ^4.8.1
+  flutter_local_notifications: ^16.3.0
+  just_audio: ^0.9.36
+  flutter_app_badger: ^1.5.0
 
 dev_dependencies:
   flutter_test:
@@ -41,6 +44,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/sounds/notification.mp3
 
 flutter_launcher_icons:
   android: true

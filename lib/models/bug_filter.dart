@@ -23,6 +23,7 @@ class BugFilter {
   final bool assignedToMe;
   final BugSortOption sortBy;
   final bool ascending;
+  final Set<int>? projectIds;
 
   BugFilter({
     this.project,
@@ -34,11 +35,12 @@ class BugFilter {
     this.assignedToMe = false,
     this.sortBy = BugSortOption.newest,
     this.ascending = false,
+    this.projectIds,
   });
 
   @override
   String toString() {
-    return 'BugFilter(project: $project, creator: $creator, assignee: $assignee, status: ${status?.name}, severity: ${severity?.name}, createdByMe: $createdByMe, assignedToMe: $assignedToMe, sortBy: $sortBy, ascending: $ascending)';
+    return 'BugFilter(project: $project, creator: $creator, assignee: $assignee, status: ${status?.name}, severity: ${severity?.name}, createdByMe: $createdByMe, assignedToMe: $assignedToMe, sortBy: $sortBy, ascending: $ascending, projectIds: $projectIds)';
   }
 
   BugFilter copyWith({
@@ -51,6 +53,7 @@ class BugFilter {
     bool? assignedToMe,
     BugSortOption? sortBy,
     bool? ascending,
+    Set<int>? projectIds,
   }) {
     return BugFilter(
       project: project ?? this.project,
@@ -62,6 +65,12 @@ class BugFilter {
       assignedToMe: assignedToMe ?? this.assignedToMe,
       sortBy: sortBy ?? this.sortBy,
       ascending: ascending ?? this.ascending,
+      projectIds: projectIds ?? this.projectIds,
     );
+  }
+
+  bool matchesProject(int? projectId) {
+    if (projectIds == null || projectIds!.isEmpty) return true;
+    return projectId != null && projectIds!.contains(projectId);
   }
 } 

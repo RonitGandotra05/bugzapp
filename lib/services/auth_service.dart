@@ -80,7 +80,23 @@ class AuthService {
   }
 
   Future<void> logout() async {
-    await TokenStorage.clearToken();
-    BugReportService().clearCache();
+    try {
+      // Try to notify the server about logout
+      final token = await TokenStorage.getToken();
+      if (token != null) {
+        try {
+          await http.post(
+            Uri.parse('${ApiConstants.baseUrl}/logout'),
+            headers: {'Authorization': 'Bearer $token'},
+          );
+        } catch (e) {
+          print('Error notifying server about logout: $e');
+        }
+      }
+    } finally {
+      // Always clear local data on explicit logout
+      await TokenStorage.clearAll();
+      BugReportService().clearCache();
+    }
   }
 } 

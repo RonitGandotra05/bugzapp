@@ -20,138 +20,121 @@ class StatsPanel extends StatelessWidget {
     required this.currentFilter,
   }) : super(key: key);
 
-  Widget _buildStatCard({
-    required BuildContext context,
-    required IconData icon,
-    required String label,
-    required String value,
-    required Color color,
-    required VoidCallback onTap,
-    required bool isSelected,
-  }) {
-    return Expanded(
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.all(8),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(16),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: isSelected ? color.withOpacity(0.1) : Colors.white,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: isSelected ? color : Colors.transparent,
-                  width: 2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.1),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    icon,
-                    color: color,
-                    size: 32,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    value,
-                    style: GoogleFonts.poppins(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: color,
-                    ),
-                  ),
-                  Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      color: isSelected ? color : Colors.grey[600],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            Colors.purple[300]!,
+            Colors.purple[400]!,
+          ],
         ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildStatCard(
+                'Total Bug\nReports',
+                totalBugs.toString(),
+                Icons.bug_report,
+                Colors.blue[100]!,
+                Colors.blue,
+                () => onFilterChange(BugFilterType.all),
+                isSelected: currentFilter == BugFilterType.all,
+              ),
+              _buildStatCard(
+                'Resolved\nBugs',
+                resolvedBugs.toString(),
+                Icons.check_circle_outline,
+                Colors.green[100]!,
+                Colors.green,
+                () => onFilterChange(BugFilterType.resolved),
+                isSelected: currentFilter == BugFilterType.resolved,
+              ),
+              _buildStatCard(
+                'Pending\nBugs',
+                pendingBugs.toString(),
+                Icons.pending_actions,
+                Colors.orange[100]!,
+                Colors.orange,
+                () => onFilterChange(BugFilterType.pending),
+                isSelected: currentFilter == BugFilterType.pending,
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final cardWidth = (screenWidth - 48) / 3; // Divide screen width by 3 with padding
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16.0),
+  Widget _buildStatCard(
+    String title,
+    String value,
+    IconData icon,
+    Color bgColor,
+    MaterialColor? accentColor,
+    VoidCallback onTap,
+    {bool isSelected = false}
+  ) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          margin: const EdgeInsets.symmetric(horizontal: 4),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isSelected ? accentColor?.withOpacity(0.1) : Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected ? accentColor ?? Colors.grey : Colors.transparent,
+              width: 2,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
+              Icon(
+                icon,
+                color: accentColor,
+                size: 28,
+              ),
+              const SizedBox(height: 8),
               Text(
-                'Welcome Back, $userName',
+                value,
                 style: GoogleFonts.poppins(
                   fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                  color: accentColor,
                 ),
               ),
-              if (pendingBugs > 0)
-                Text(
-                  'You have $pendingBugs pending reports to resolve.',
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    color: Colors.white.withOpacity(0.8),
-                  ),
+              const SizedBox(height: 4),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.poppins(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                  height: 1.2,
                 ),
+              ),
             ],
           ),
         ),
-        Row(
-          children: [
-            _buildStatCard(
-              context: context,
-              icon: Icons.bug_report,
-              label: 'Total Bug\nReports',
-              value: totalBugs.toString(),
-              color: Colors.blue,
-              onTap: () => onFilterChange(BugFilterType.all),
-              isSelected: currentFilter == BugFilterType.all,
-            ),
-            _buildStatCard(
-              context: context,
-              icon: Icons.check_circle,
-              label: 'Resolved\nBugs',
-              value: resolvedBugs.toString(),
-              color: Colors.green,
-              onTap: () => onFilterChange(BugFilterType.resolved),
-              isSelected: currentFilter == BugFilterType.resolved,
-            ),
-            _buildStatCard(
-              context: context,
-              icon: Icons.warning,
-              label: 'Pending\nBugs',
-              value: pendingBugs.toString(),
-              color: Colors.red,
-              onTap: () => onFilterChange(BugFilterType.pending),
-              isSelected: currentFilter == BugFilterType.pending,
-            ),
-          ],
-        ),
-      ],
+      ),
     );
   }
 } 

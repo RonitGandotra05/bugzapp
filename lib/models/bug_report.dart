@@ -66,6 +66,11 @@ class BugReport {
     Map<String, dynamic>? projectData = json['project'] is Map ? json['project'] as Map<String, dynamic> : null;
     String? projectName = projectData?['name'] ?? json['project_name']?.toString();
 
+    // Debug print for CC recipients
+    print('Raw CC Recipients: ${json['cc_recipients']}');
+    final ccRecipients = (json['cc_recipients'] as List<dynamic>?)?.cast<String>() ?? [];
+    print('Parsed CC Recipients: $ccRecipients');
+
     return BugReport(
       id: json['id'] as int,
       description: json['description'] as String,
@@ -78,7 +83,7 @@ class BugReport {
       modifiedDate: modifiedDate ?? DateTime.now().add(Duration(hours: 5, minutes: 30)),
       projectName: projectName,
       tabUrl: json['tab_url'] as String?,
-      ccRecipients: (json['cc_recipients'] as List<dynamic>?)?.cast<String>() ?? [],
+      ccRecipients: ccRecipients,
       creatorId: creatorData?['id'] ?? json['creator_id'],
       recipientId: recipientData?['id'] ?? json['recipient_id'],
       projectId: projectData?['id'] ?? json['project_id'],
@@ -118,6 +123,10 @@ class BugReport {
     return status.toString().split('.').last[0].toUpperCase() +
            status.toString().split('.').last.substring(1).toLowerCase();
   }
+
+  String get creatorName => creator ?? 'Unknown';
+  
+  bool get isRead => false; // Default to false until we implement read status tracking
 
   Color get severityColor {
     switch (severity) {

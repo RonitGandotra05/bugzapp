@@ -419,6 +419,8 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
           _buildDetailRow('Severity', widget.bug.severityText),
           _buildDetailRow('Created By', widget.bug.creator),
           _buildDetailRow('Assigned To', widget.bug.recipient),
+          if (widget.bug.ccRecipients.isNotEmpty)
+            _buildDetailRow('CC', widget.bug.ccRecipients.join(", ")),
           _buildDetailRow('Project', widget.bug.projectName ?? 'No Project'),
           _buildDetailRow('Created', 
             _getFormattedTime(widget.bug.modifiedDate)),

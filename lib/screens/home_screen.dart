@@ -26,6 +26,8 @@ import 'package:http_parser/http_parser.dart';
 import '../services/auth_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
+import '../widgets/notification_bell.dart';
+import '../services/notification_service.dart';
 
 enum BugFilter {
   all,
@@ -140,6 +142,8 @@ class _HomeScreenState extends State<HomeScreen> {
   final _searchController = TextEditingController();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _formKey = GlobalKey<FormState>();
+  final _scrollController = ScrollController();
+  final _listViewKey = GlobalKey();
   
   User? _currentUser;
   List<User> _users = [];
@@ -176,6 +180,15 @@ class _HomeScreenState extends State<HomeScreen> {
   File? _cachedImageFile;
   Uint8List? _cachedWebImageBytes;
 
+  int? _highlightedBugId;
+
+  Set<int> _selectedBugIds = {};
+  bool get _isSelectionMode => _selectedBugIds.isNotEmpty;
+
+  String? _error;
+
+  final Map<int, GlobalKey> _bugCardKeys = {};
+
   @override
   void initState() {
     super.initState();
@@ -193,41 +206,84 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _setupRealTimeUpdates() {
     // Listen for bug report updates
-    _bugReportService.bugReportStream.listen((bugReport) {
-      if (mounted) {
-        setState(() {
-          print('Received bug report update: ${bugReport.id} - ${bugReport.description}');
-          
-          // Update or add the bug report in the list
-          final index = _bugReports.indexWhere((b) => b.id == bugReport.id);
-          if (index != -1) {
-            _bugReports[index] = bugReport;
-            print('Updated existing bug report at index $index');
-          } else {
-            _bugReports.add(bugReport);
-            print('Added new bug report to list');
-          }
-          
-          // Sort the list to maintain order
-          _bugReports.sort((a, b) => 
-            _isAscendingOrder ? a.id.compareTo(b.id) : b.id.compareTo(a.id)
-          );
-          
-          // Update filter manager
-          _updateFilterManager();
-          
-          print('Current bug reports count: ${_bugReports.length}');
-          print('Filtered bug reports count: ${_filterManager.searchFiltered.length}');
-        });
-      }
-    });
+    _bugReportService.bugReportStream.listen(
+      (bugReport) {
+        if (mounted) {
+          setState(() {
+            print('Received bug report update: ${bugReport.id} - ${bugReport.description}');
+            
+            // Update or add the bug report in the list
+            final index = _bugReports.indexWhere((b) => b.id == bugReport.id);
+            if (index != -1) {
+              _bugReports[index] = bugReport;
+              print('Updated existing bug report at index $index');
+            } else {
+              _bugReports.add(bugReport);
+              print('Added new bug report to list');
+              
+              // Only show notification for new bug reports and if not created by current user
+              if (_currentUser?.id != bugReport.creatorId) {
+                NotificationService().showNotification(
+                  title: 'New Bug Report',
+                  body: 'From ${bugReport.creatorName}: ${bugReport.description}',
+                  payload: bugReport.id.toString(),
+                );
+              }
+            }
+            
+            // Sort the list to maintain order
+            _bugReports.sort((a, b) => 
+              _isAscendingOrder ? a.id.compareTo(b.id) : b.id.compareTo(a.id)
+            );
+            
+            // Update filter manager
+            _updateFilterManager();
+            _error = null; // Clear any existing errors
+            
+            print('Current bug reports count: ${_bugReports.length}');
+            print('Filtered bug reports count: ${_filterManager.searchFiltered.length}');
+          });
+        }
+      },
+      onError: (e) {
+        if (mounted) {
+          setState(() => _error = 'Error receiving updates: $e');
+        }
+      },
+    );
 
     // Listen for comment updates
     _bugReportService.commentStream.listen((comment) {
       if (mounted) {
         setState(() {
           print('Received comment update for bug ${comment.bugReportId}');
+          
+          // Only show notification if the comment is not from current user
+          if (_currentUser?.id != comment.userId) {
+            NotificationService().showNotification(
+              title: 'New Comment',
+              body: '${comment.userName} commented on bug #${comment.bugReportId}',
+              payload: comment.bugReportId.toString(),
+            );
+          }
         });
+      }
+    });
+
+    // Update badge count periodically
+    Timer.periodic(const Duration(minutes: 1), (timer) {
+      if (mounted) {
+        final unreadCount = _bugReports.where((bug) => 
+          bug.creatorId != _currentUser?.id && 
+          !bug.isRead && 
+          bug.modifiedDate.isAfter(DateTime.now().subtract(const Duration(days: 1)))
+        ).length;
+        
+        if (unreadCount > 0) {
+          NotificationService().updateBadgeCount(unreadCount);
+        } else {
+          NotificationService().clearAllNotifications();
+        }
       }
     });
 
@@ -269,7 +325,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _updateFilterManager() {
     _filterManager = BugFilterManager(
-      allBugs: _bugReports,
+      allBugs: List.from(_bugReports),
       userFilter: _currentBugFilter,
       statusFilter: _currentFilter,
       currentUser: _currentUser,
@@ -308,24 +364,27 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadData() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
     try {
       final currentUser = await _bugReportService.getCurrentUser();
       final users = await _bugReportService.fetchUsers();
       final projects = await _bugReportService.fetchProjects();
       final bugReports = await _bugReportService.getAllBugReports();
-
+      
       if (mounted) {
         setState(() {
           _currentUser = currentUser;
-          _userName = currentUser?.name ?? 'User';  // Set the user name
           _users = users;
+          _availableUsers = users;
           _projects = projects;
           _bugReports = bugReports;
-          _bugReports.sort((a, b) => 
-            _isAscendingOrder ? a.id.compareTo(b.id) : b.id.compareTo(a.id)
-          );
           _isLoading = false;
+          _error = null;
+          
+          // Update filter manager with fresh data
           _updateFilterManager();
         });
       }
@@ -334,6 +393,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         setState(() {
           _isLoading = false;
+          _error = e.toString();
         });
       }
     }
@@ -421,29 +481,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _uploadBugReport() async {
     if (_description == null || _description!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Description is required')),
-      );
+      setState(() => _error = 'Description is required');
       return;
     }
 
     if (_selectedRecipient == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a recipient')),
-      );
+      setState(() => _error = 'Please select a recipient');
       return;
     }
 
-    if (_imageFile == null && _webImageBytes == null && _cachedImageFile == null && _cachedWebImageBytes == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select or capture an image')),
-      );
+    if (_imageFile == null && _webImageBytes == null && 
+        _cachedImageFile == null && _cachedWebImageBytes == null) {
+      setState(() => _error = 'Please select or capture an image');
       return;
     }
+
+    setState(() {
+      _isSubmitting = true;
+      _error = null;
+    });
 
     try {
-      setState(() => _isSubmitting = true);
-      
       // Use cached image if main image is null
       final imageFileToUpload = _imageFile ?? _cachedImageFile;
       final imageBytesToUpload = _webImageBytes ?? _cachedWebImageBytes;
@@ -469,6 +527,7 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       if (mounted) {
+        setState(() => _error = e.toString());
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error uploading bug report: $e')),
         );
@@ -482,7 +541,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _takePicture() async {
     if (kIsWeb) {
-      // On web, directly use image picker as it will fall back to file picker
       await _pickImage(ImageSource.camera);
       return;
     }
@@ -490,20 +548,81 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       // Check camera permission
       final status = await Permission.camera.status;
-      if (status.isDenied) {
-        // Request permission
-        final result = await Permission.camera.request();
-        if (result.isDenied) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Camera permission is required to take photos'),
-                backgroundColor: Colors.red,
+      if (status.isDenied || status.isRestricted) {
+        // Show explanation dialog before requesting permission
+        if (mounted) {
+          final shouldRequest = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text(
+                'Camera Permission Required',
+                style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
               ),
-            );
+              content: Text(
+                'BugZapp needs camera access to capture bug report screenshots. Would you like to grant camera access?',
+                style: GoogleFonts.poppins(),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: Text(
+                    'Not Now',
+                    style: GoogleFonts.poppins(),
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: Text(
+                    'Grant Access',
+                    style: GoogleFonts.poppins(),
+                  ),
+                ),
+              ],
+            ),
+          ) ?? false;
+
+          if (!shouldRequest) return;
+
+          // Request permission
+          final result = await Permission.camera.request();
+          if (result.isDenied || result.isPermanentlyDenied) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    result.isPermanentlyDenied
+                        ? 'Camera permission is required. Please enable it in app settings.'
+                        : 'Camera permission is required to take photos',
+                  ),
+                  backgroundColor: Colors.red,
+                  action: result.isPermanentlyDenied
+                      ? SnackBarAction(
+                          label: 'Settings',
+                          onPressed: () => openAppSettings(),
+                          textColor: Colors.white,
+                        )
+                      : null,
+                ),
+              );
+            }
+            return;
           }
-          return;
         }
+      } else if (status.isPermanentlyDenied) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Camera permission is required. Please enable it in app settings.'),
+              backgroundColor: Colors.red,
+              action: SnackBarAction(
+                label: 'Settings',
+                onPressed: () => openAppSettings(),
+                textColor: Colors.white,
+              ),
+            ),
+          );
+        }
+        return;
       }
 
       final ImagePicker picker = ImagePicker();
@@ -515,14 +634,29 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       
       if (photo != null && mounted) {
-        final file = File(photo.path);
-        setState(() {
-          _imageFile = file;
-          _selectedFile = file;
-          _cachedImageFile = file;
-          _webImageBytes = null;
-          _cachedWebImageBytes = null;
-        });
+        // Process image in a separate isolate if possible
+        try {
+          final file = File(photo.path);
+          if (mounted) {
+            setState(() {
+              _imageFile = file;
+              _selectedFile = file;
+              _cachedImageFile = file;
+              _webImageBytes = null;
+              _cachedWebImageBytes = null;
+            });
+          }
+        } catch (e) {
+          print('Error processing image: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error processing photo: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
       }
     } catch (e) {
       print('Error taking picture: $e');
@@ -548,24 +682,40 @@ class _HomeScreenState extends State<HomeScreen> {
       );
       
       if (photo != null && mounted) {
-        if (kIsWeb) {
-          final bytes = await photo.readAsBytes();
-          setState(() {
-            _webImageBytes = bytes;
-            _cachedWebImageBytes = bytes;
-            _imageFile = null;
-            _selectedFile = null;
-            _cachedImageFile = null;
-          });
-        } else {
-          final file = File(photo.path);
-          setState(() {
-            _imageFile = file;
-            _selectedFile = file;
-            _cachedImageFile = file;
-            _webImageBytes = null;
-            _cachedWebImageBytes = null;
-          });
+        try {
+          if (kIsWeb) {
+            final bytes = await photo.readAsBytes();
+            if (mounted) {
+              setState(() {
+                _webImageBytes = bytes;
+                _cachedWebImageBytes = bytes;
+                _imageFile = null;
+                _selectedFile = null;
+                _cachedImageFile = null;
+              });
+            }
+          } else {
+            final file = File(photo.path);
+            if (mounted) {
+              setState(() {
+                _imageFile = file;
+                _selectedFile = file;
+                _cachedImageFile = file;
+                _webImageBytes = null;
+                _cachedWebImageBytes = null;
+              });
+            }
+          }
+        } catch (e) {
+          print('Error processing selected image: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error processing selected image: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
       }
     } catch (e) {
@@ -593,7 +743,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _refreshEverything() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _error = null; // Reset error state
+    });
     try {
       // Clear all caches and reinitialize everything
       await _bugReportService.refreshEverything();
@@ -613,6 +766,9 @@ class _HomeScreenState extends State<HomeScreen> {
     } catch (e) {
       print('Error during refresh: $e');
       if (mounted) {
+        setState(() {
+          _error = e.toString();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error refreshing: $e'),
@@ -629,105 +785,130 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Add this method to show project filter dialog
   void _showProjectFilterDialog() {
+    bool isApplying = false;
+
     showDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            return AlertDialog(
-              title: Text(
-                'Filter by Projects',
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              content: Container(
-                width: double.maxFinite,
-                child: ListView(
-                  shrinkWrap: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(
+            'Filter by Projects',
+            style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          content: Container(
+            width: double.maxFinite,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                // Select All/None row
+                Row(
                   children: [
-                    // Select All/None row
-                    Row(
-                      children: [
-                        TextButton.icon(
-                          icon: Icon(Icons.select_all, color: Colors.purple[400]),
-                          label: Text(
-                            'Select All',
-                            style: GoogleFonts.poppins(color: Colors.purple[400]),
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              _selectedProjectIds = _projects.map((p) => p.id).toSet();
-                            });
-                          },
-                        ),
-                        const Spacer(),
-                        TextButton.icon(
-                          icon: Icon(Icons.clear_all, color: Colors.grey[600]),
-                          label: Text(
-                            'Clear All',
-                            style: GoogleFonts.poppins(color: Colors.grey[600]),
-                          ),
-                          onPressed: () {
-                            setState(() {
-                              _selectedProjectIds.clear();
-                            });
-                          },
-                        ),
-                      ],
+                    TextButton.icon(
+                      icon: Icon(Icons.select_all, color: Colors.purple[400]),
+                      label: Text(
+                        'Select All',
+                        style: GoogleFonts.poppins(color: Colors.purple[400]),
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _selectedProjectIds = Set.from(_projects.map((p) => p.id));
+                          _updateFilterManager(); // Update filter manager immediately
+                        });
+                      },
                     ),
-                    const Divider(),
-                    ..._projects.map((project) {
-                      return CheckboxListTile(
-                        title: Text(
-                          project.name,
-                          style: GoogleFonts.poppins(),
-                        ),
-                        value: _selectedProjectIds.contains(project.id),
-                        activeColor: Colors.purple[400],
-                        onChanged: (bool? value) {
-                          setState(() {
-                            if (value == true) {
-                              _selectedProjectIds.add(project.id);
-                            } else {
-                              _selectedProjectIds.remove(project.id);
-                            }
-                          });
-                        },
-                      );
-                    }).toList(),
+                    const Spacer(),
+                    TextButton.icon(
+                      icon: Icon(Icons.clear_all, color: Colors.grey[600]),
+                      label: Text(
+                        'Clear All',
+                        style: GoogleFonts.poppins(color: Colors.grey[600]),
+                      ),
+                      onPressed: () {
+                        setState(() {
+                          _selectedProjectIds.clear();
+                          _updateFilterManager(); // Update filter manager immediately
+                        });
+                      },
+                    ),
                   ],
                 ),
+                const Divider(),
+                ..._projects.map((project) {
+                  return Material(
+                    color: Colors.transparent,
+                    child: CheckboxListTile(
+                      title: Text(
+                        project.name,
+                        style: GoogleFonts.poppins(),
+                      ),
+                      value: _selectedProjectIds.contains(project.id),
+                      activeColor: Colors.purple[400],
+                      onChanged: (bool? value) {
+                        setState(() {
+                          if (value == true) {
+                            _selectedProjectIds.add(project.id);
+                          } else {
+                            _selectedProjectIds.remove(project.id);
+                          }
+                          _updateFilterManager(); // Update filter manager immediately
+                        });
+                      },
+                    ),
+                  );
+                }).toList(),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isApplying ? null : () {
+                // Reset to previous state if cancelled
+                this.setState(() {
+                  _updateFilterManager();
+                });
+                Navigator.pop(context);
+              },
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.poppins(color: Colors.grey[600]),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text(
-                    'Cancel',
-                    style: GoogleFonts.poppins(color: Colors.grey[600]),
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    this.setState(() {
-                      // Update the main state
-                      _updateFilterManager();
-                    });
-                    Navigator.pop(context);
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.purple[400],
-                  ),
-                  child: Text(
+            ),
+            ElevatedButton(
+              onPressed: isApplying ? null : () async {
+                setState(() => isApplying = true);
+                
+                // Add a small delay to show the loading state
+                await Future.delayed(const Duration(milliseconds: 300));
+                
+                this.setState(() {
+                  _updateFilterManager();
+                });
+                
+                Navigator.pop(context);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.purple[400],
+                minimumSize: const Size(80, 36),
+              ),
+              child: isApplying
+                ? SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Text(
                     'Apply',
                     style: GoogleFonts.poppins(color: Colors.white),
                   ),
-                ),
-              ],
-            );
-          },
-        );
-      },
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -914,11 +1095,244 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _scrollToBugCard(int bugId) {
+    final index = _sortedAndFilteredBugReports.indexWhere((bug) => bug.id == bugId);
+    if (index != -1) {
+      // Ensure we have a key for this bug card
+      _bugCardKeys[bugId] = _bugCardKeys[bugId] ?? GlobalKey();
+      
+      setState(() {
+        // Reset filters to show all bugs
+        _currentBugFilter = BugFilter.all;
+        _currentFilter = BugFilterType.all;
+        _searchQuery = '';
+        _searchController.clear();
+        _selectedProjectIds.clear();
+        _updateFilterManager();
+        _highlightedBugId = bugId;
+      });
+
+      // Wait for the next frame to ensure the ListView is built
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        // Wait a bit more to ensure all cards are properly laid out
+        await Future.delayed(const Duration(milliseconds: 100));
+        
+        final context = _listViewKey.currentContext;
+        if (context != null) {
+          final RenderBox listViewBox = context.findRenderObject() as RenderBox;
+          final listViewOffset = listViewBox.localToGlobal(Offset.zero);
+          
+          // Find the target card's render box using its GlobalKey
+          final cardContext = _bugCardKeys[bugId]?.currentContext;
+          if (cardContext != null) {
+            final targetCard = cardContext.findRenderObject() as RenderBox;
+            final targetCardOffset = targetCard.localToGlobal(Offset.zero);
+            
+            // Calculate the scroll offset needed
+            final scrollOffset = targetCardOffset.dy - listViewOffset.dy;
+            
+            // Scroll to the target position with some padding
+            _scrollController.animateTo(
+              _scrollController.offset + scrollOffset - 20, // Add padding to ensure card is fully visible
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeInOut,
+            ).then((_) {
+              // Remove highlight after 2 seconds
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) {
+                  setState(() {
+                    _highlightedBugId = null;
+                  });
+                }
+              });
+            });
+          }
+        }
+      });
+    }
+  }
+
+  void _toggleBugSelection(BugReport bug, bool selected) {
+    setState(() {
+      if (selected) {
+        _selectedBugIds.add(bug.id);
+      } else {
+        _selectedBugIds.remove(bug.id);
+      }
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectedBugIds.clear();
+    });
+  }
+
+  Future<void> _handleMultipleDelete() async {
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Delete Bug Reports'),
+        content: Text('Are you sure you want to delete ${_selectedBugIds.length} bug reports?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Delete', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldDelete == true) {
+      try {
+        for (final bugId in _selectedBugIds) {
+          await _bugReportService.deleteBugReport(bugId);
+        }
+        _clearSelection();
+        _loadData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Bug reports deleted successfully')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error deleting bug reports: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Future<void> _handleMultipleStatusToggle() async {
+    final selectedBugs = _bugReports.where((bug) => _selectedBugIds.contains(bug.id)).toList();
+    final allResolved = selectedBugs.every((bug) => bug.status == BugStatus.resolved);
+    final allPending = selectedBugs.every((bug) => bug.status == BugStatus.assigned);
+
+    if (!allResolved && !allPending) return; // Mixed status, don't show toggle option
+
+    final newStatus = allResolved ? 'pending' : 'resolved';
+    final shouldToggle = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Change Status'),
+        content: Text('Mark ${_selectedBugIds.length} bugs as $newStatus?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Confirm'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldToggle == true) {
+      try {
+        for (final bugId in _selectedBugIds) {
+          await _bugReportService.toggleBugStatus(bugId);
+        }
+        _clearSelection();
+        _loadData();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Bug reports updated successfully')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error updating bug reports: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  PreferredSizeWidget _buildSelectionAppBar() {
+    final selectedBugs = _bugReports.where((bug) => _selectedBugIds.contains(bug.id)).toList();
+    final allResolved = selectedBugs.every((bug) => bug.status == BugStatus.resolved);
+    final allPending = selectedBugs.every((bug) => bug.status == BugStatus.assigned);
+
+    return AppBar(
+      backgroundColor: Colors.white,
+      elevation: 0,
+      leading: IconButton(
+        icon: Icon(Icons.close),
+        onPressed: _clearSelection,
+        color: Colors.black87,
+      ),
+      title: Text(
+        '${_selectedBugIds.length} selected',
+        style: TextStyle(color: Colors.black87),
+      ),
+      actions: [
+        if (allResolved || allPending)
+          IconButton(
+            icon: Icon(
+              allResolved ? Icons.refresh : Icons.check_circle_outline,
+              color: allResolved ? Colors.orange : Colors.green,
+            ),
+            onPressed: _handleMultipleStatusToggle,
+            tooltip: allResolved ? 'Mark as Pending' : 'Mark as Resolved',
+          ),
+        IconButton(
+          icon: Icon(Icons.delete_outline, color: Colors.red),
+          onPressed: _handleMultipleDelete,
+          tooltip: 'Delete Selected',
+        ),
+      ],
+    );
+  }
+
+  // Add error display widget
+  Widget _buildErrorDisplay() {
+    if (_error == null) return const SizedBox.shrink();
+    
+    return Container(
+      padding: const EdgeInsets.all(8),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.red[50],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red[200]!),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline, color: Colors.red[700]),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _error!,
+              style: GoogleFonts.poppins(
+                color: Colors.red[700],
+                fontSize: 14,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close),
+            onPressed: () => setState(() => _error = null),
+            color: Colors.red[700],
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       key: _scaffoldKey,
-      appBar: AppBar(
+      appBar: _isSelectionMode ? _buildSelectionAppBar() : AppBar(
         leading: IconButton(
           icon: const Icon(
             Icons.menu,
@@ -937,140 +1351,207 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.transparent,
         elevation: 0,
         actions: [
-          const SizedBox(width: 48),
+          NotificationBell(
+            bugReportStream: _bugReportService.bugReportStream,
+            commentStream: _bugReportService.commentStream,
+            onBugTap: _scrollToBugCard,
+          ),
+          const SizedBox(width: 8),
         ],
       ),
       drawer: AppDrawer(
-        isAdmin: _currentUser?.isAdmin ?? false,
         onLogout: _handleLogout,
+        userName: _userName,
+        isAdmin: _currentUser?.isAdmin ?? false,
       ),
-      body: RefreshIndicator(
-        onRefresh: _refreshEverything,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                const Color(0xFF9575CD),
-                const Color(0xFF7E57C2),
-                const Color(0xFF673AB7),
+      body: Stack(
+        children: [
+          RefreshIndicator(
+            onRefresh: _refreshEverything,
+            child: CustomScrollView(
+              controller: _scrollController,
+              slivers: [
+                // Welcome Message
+                SliverToBoxAdapter(
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Colors.purple[300]!,
+                          Colors.purple[400]!,
+                        ],
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Welcome Back, ${_userName ?? ""}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'You have ${_getPendingBugs()} pending reports to resolve.',
+                          style: GoogleFonts.poppins(
+                            fontSize: 14,
+                            color: Colors.white.withOpacity(0.9),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Stats Panel
+                SliverToBoxAdapter(
+                  child: _buildStatsPanel(),
+                ),
+                // Search Bar
+                SliverToBoxAdapter(
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    child: CustomSearchBar(
+                      controller: _searchController,
+                      onChanged: (value) {
+                        setState(() {
+                          _searchQuery = value;
+                        });
+                      },
+                      onClear: () {
+                        setState(() {
+                          _searchQuery = '';
+                        });
+                      },
+                      hintText: 'Search by description, creator, or project...',
+                    ),
+                  ),
+                ),
+                // Filter Chips
+                SliverToBoxAdapter(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        _buildFilterButton(),
+                        // Sort Button
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.1),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              onTap: _toggleSortOrder,
+                              customBorder: const CircleBorder(),
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Icon(
+                                  _isAscendingOrder 
+                                      ? Icons.arrow_upward
+                                      : Icons.arrow_downward,
+                                  size: 24,
+                                  color: Colors.purple[400],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Bug List
+                SliverToBoxAdapter(
+                  child: Container(
+                    key: _listViewKey,
+                    color: const Color(0xFFFAF9F6),
+                    child: Column(
+                      children: [
+                        if (_isLoading)
+                          const Center(child: CircularProgressIndicator())
+                        else if (_sortedAndFilteredBugReports.isEmpty)
+                          Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Text(
+                                'No bug reports found',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 16,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          ListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: _sortedAndFilteredBugReports.length,
+                            itemBuilder: (context, index) {
+                              final bug = _sortedAndFilteredBugReports[index];
+                              // Ensure we have a key for this bug card
+                              _bugCardKeys[bug.id] = _bugCardKeys[bug.id] ?? GlobalKey();
+                              return BugCard(
+                                key: _bugCardKeys[bug.id],
+                                bug: bug,
+                                onStatusToggle: () => _toggleBugStatus(bug.id),
+                                onDelete: () => _deleteBugReport(bug.id),
+                                onSendReminder: () => _sendReminder(bug.id),
+                                bugReportService: _bugReportService,
+                                highlight: bug.id == _highlightedBugId,
+                                isSelected: _selectedBugIds.contains(bug.id),
+                                onSelectionChanged: (selected) => _toggleBugSelection(bug, selected),
+                                selectionMode: _selectedBugIds.isNotEmpty,
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
-          child: CustomScrollView(
-            slivers: [
-              // Stats Panel
-              SliverToBoxAdapter(
-                child: _buildStatsPanel(),
-              ),
-              // Search Bar
-              SliverToBoxAdapter(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  child: CustomSearchBar(
-                    controller: _searchController,
-                    onChanged: (value) {
-                      setState(() {
-                        _searchQuery = value;
-                      });
-                    },
-                    onClear: () {
-                      setState(() {
-                        _searchQuery = '';
-                      });
-                    },
-                    hintText: 'Search by description, creator, or project...',
-                  ),
+          // Scroll to top button
+          AnimatedBuilder(
+            animation: _scrollController,
+            builder: (context, child) {
+              final showButton = _scrollController.hasClients && 
+                               _scrollController.offset > 300;
+              return AnimatedPositioned(
+                duration: const Duration(milliseconds: 200),
+                left: 16,
+                bottom: showButton ? 16 : -60,
+                child: FloatingActionButton.small(
+                  onPressed: () {
+                    _scrollController.animateTo(
+                      0,
+                      duration: const Duration(milliseconds: 500),
+                      curve: Curves.easeInOut,
+                    );
+                  },
+                  backgroundColor: Colors.purple[400],
+                  child: const Icon(Icons.arrow_upward),
                 ),
-              ),
-              // Filter Chips
-              SliverToBoxAdapter(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    children: [
-                      _buildFilterButton(),
-                      // Sort Button
-                      Container(
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 8,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            onTap: _toggleSortOrder,
-                            customBorder: const CircleBorder(),
-                            child: Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Icon(
-                                _isAscendingOrder 
-                                    ? Icons.arrow_upward
-                                    : Icons.arrow_downward,
-                                size: 24,
-                                color: Colors.purple[400],
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              // Bug List
-              SliverToBoxAdapter(
-                child: Container(
-                  color: const Color(0xFFFAF9F6),
-                  child: Column(
-                    children: [
-                      if (_isLoading)
-                        const Center(child: CircularProgressIndicator())
-                      else if (_sortedAndFilteredBugReports.isEmpty)
-                        Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Text(
-                              'No bug reports found',
-                              style: GoogleFonts.poppins(
-                                fontSize: 16,
-                                color: Colors.grey[600],
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        ListView.builder(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: _sortedAndFilteredBugReports.length,
-                          itemBuilder: (context, index) {
-                            final bug = _sortedAndFilteredBugReports[index];
-                            return BugCard(
-                              bug: bug,
-                              onStatusToggle: () => _toggleBugStatus(bug.id),
-                              onDelete: () => _deleteBugReport(bug.id),
-                              onSendReminder: () => _sendReminder(bug.id),
-                              bugReportService: _bugReportService,
-                            );
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
+              );
+            },
           ),
-        ),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: () => _showAddBugReport(context),

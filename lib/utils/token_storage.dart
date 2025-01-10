@@ -6,38 +6,52 @@ class TokenStorage {
   static const String _isAdminKey = 'is_admin';
   static const String _userIdKey = 'user_id';
   static const String _tokenExpiryKey = 'token_expiry';
+  static const String _lastRefreshKey = 'last_refresh';
+  
+  // Set token lifetime to 1 year
+  static final Duration _tokenLifetime = Duration(days: 365);
+  // Set refresh threshold to 7 days
+  static final Duration _refreshThreshold = Duration(days: 7);
 
   static Future<void> saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, token);
     
-    // Set token expiry to 24 hours from now
-    final expiry = DateTime.now().add(Duration(hours: 24)).toIso8601String();
-    await prefs.setString(_tokenExpiryKey, expiry);
+    // Set expiry to 1 year from now
+    final expiry = DateTime.now().add(_tokenLifetime);
+    await prefs.setString(_tokenExpiryKey, expiry.toIso8601String());
+    
+    // Set last refresh time to now
+    await prefs.setString(_lastRefreshKey, DateTime.now().toIso8601String());
   }
 
   static Future<String?> getToken() async {
     final prefs = await SharedPreferences.getInstance();
     final token = prefs.getString(_tokenKey);
-    final expiryStr = prefs.getString(_tokenExpiryKey);
-
-    if (token == null || expiryStr == null) {
-      return null;
+    
+    if (token != null) {
+      // Check if token needs refresh
+      final lastRefreshStr = prefs.getString(_lastRefreshKey);
+      if (lastRefreshStr != null) {
+        final lastRefresh = DateTime.parse(lastRefreshStr);
+        final now = DateTime.now();
+        
+        if (now.difference(lastRefresh) >= _refreshThreshold) {
+          // Update expiry and last refresh time
+          final newExpiry = now.add(_tokenLifetime);
+          await prefs.setString(_tokenExpiryKey, newExpiry.toIso8601String());
+          await prefs.setString(_lastRefreshKey, now.toIso8601String());
+        }
+      }
     }
-
-    final expiry = DateTime.parse(expiryStr);
-    if (DateTime.now().isAfter(expiry)) {
-      // Token expired, clear all data
-      await clearAll();
-      return null;
-    }
-
+    
     return token;
   }
 
   static Future<void> deleteToken() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
+    await prefs.remove(_tokenExpiryKey);
   }
 
   static Future<void> saveIsAdmin(bool isAdmin) async {
@@ -84,13 +98,44 @@ class TokenStorage {
   }
 
   static Future<bool> isLoggedIn() async {
-    final token = await getToken();  // This will handle expiry check
-    final userId = await getUserId();
-    return token != null && userId != null;
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString(_tokenKey);
+    final expiryStr = prefs.getString(_tokenExpiryKey);
+    
+    if (token == null || expiryStr == null) return false;
+    
+    try {
+      final expiry = DateTime.parse(expiryStr);
+      final now = DateTime.now();
+      
+      if (now.isAfter(expiry)) {
+        // Token has expired
+        await clearAll();
+        return false;
+      }
+      
+      // Check if token needs refresh
+      final lastRefreshStr = prefs.getString(_lastRefreshKey);
+      if (lastRefreshStr != null) {
+        final lastRefresh = DateTime.parse(lastRefreshStr);
+        if (now.difference(lastRefresh) >= _refreshThreshold) {
+          // Update expiry and last refresh time
+          final newExpiry = now.add(_tokenLifetime);
+          await prefs.setString(_tokenExpiryKey, newExpiry.toIso8601String());
+          await prefs.setString(_lastRefreshKey, now.toIso8601String());
+        }
+      }
+      
+      return true;
+    } catch (e) {
+      print('Error parsing token expiry: $e');
+      return false;
+    }
   }
 
   static Future<void> clearToken() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_tokenKey);
+    await prefs.remove(_tokenExpiryKey);
   }
 } 

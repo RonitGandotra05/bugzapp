@@ -1,101 +1,130 @@
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import '../constants/api_constants.dart';
-import 'package:http/http.dart' as http;
-import '../utils/token_storage.dart';
+import 'package:just_audio/just_audio.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_app_badger/flutter_app_badger.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class NotificationService {
-  static final FirebaseMessaging _firebaseMessaging = FirebaseMessaging.instance;
-  static final FlutterLocalNotificationsPlugin _localNotifications = 
-      FlutterLocalNotificationsPlugin();
-  
-  static Future<void> initialize() async {
-    // Request permission
-    await _firebaseMessaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
+  static final NotificationService _instance = NotificationService._internal();
+  final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+  late SharedPreferences _prefs;
+
+  factory NotificationService() {
+    return _instance;
+  }
+
+  NotificationService._internal();
+
+  Future<void> initialize() async {
+    _prefs = await SharedPreferences.getInstance();
+    
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+        
+    const DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
+      requestSoundPermission: false,
+      requestBadgePermission: true,
+      requestAlertPermission: true,
     );
 
-    // Initialize local notifications
-    const initializationSettingsAndroid = 
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initializationSettingsIOS = DarwinInitializationSettings();
-    const initializationSettings = InitializationSettings(
+    const InitializationSettings initializationSettings = InitializationSettings(
       android: initializationSettingsAndroid,
       iOS: initializationSettingsIOS,
     );
 
-    await _localNotifications.initialize(
+    await _flutterLocalNotificationsPlugin.initialize(
       initializationSettings,
-      onDidReceiveNotificationResponse: (details) {
+      onDidReceiveNotificationResponse: (NotificationResponse notificationResponse) {
         // Handle notification tap
-        _handleNotificationTap(details);
       },
     );
+  }
 
-    // Get FCM token
-    final token = await _firebaseMessaging.getToken();
-    if (token != null) {
-      await _updateDeviceToken(token);
+  // Show notification without sound and track read status
+  Future<void> showNotification({
+    required String title,
+    required String body,
+    String? payload,
+    bool playSound = false,
+  }) async {
+    // Create a unique key for this notification
+    final String notificationKey = '${title}_${body}_${payload ?? ''}';
+    
+    // Check if this notification was already shown
+    final bool wasShown = await _hasBeenShown(notificationKey);
+    if (wasShown) {
+      return; // Skip if already shown
     }
 
-    // Listen for token refresh
-    _firebaseMessaging.onTokenRefresh.listen(_updateDeviceToken);
-
-    // Handle notifications when app is in background
-    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
-    // Handle notifications when app is in foreground
-    FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
-  }
-
-  static Future<void> _updateDeviceToken(String token) async {
-    final userId = await TokenStorage.getUserId();
-    if (userId == null) return;
-
-    try {
-      await http.post(
-        Uri.parse('${ApiConstants.baseUrl}/users/$userId/device-token'),
-        headers: await TokenStorage.getHeaders(),
-        body: {'token': token},
-      );
-    } catch (e) {
-      print('Error updating device token: $e');
-    }
-  }
-
-  static Future<void> _firebaseMessagingBackgroundHandler(
-    RemoteMessage message) async {
-    await _showLocalNotification(message);
-  }
-
-  static Future<void> _handleForegroundMessage(RemoteMessage message) async {
-    await _showLocalNotification(message);
-  }
-
-  static Future<void> _showLocalNotification(RemoteMessage message) async {
-    final androidDetails = AndroidNotificationDetails(
-      'bug_reports_channel',
+    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
+      'bug_channel',
       'Bug Reports',
-      channelDescription: 'Notifications for bug reports',
+      channelDescription: 'Notifications for bug reports and updates',
       importance: Importance.high,
       priority: Priority.high,
+      playSound: false,
+      enableVibration: false,
+      styleInformation: BigTextStyleInformation(''),
     );
 
-    final iosDetails = const DarwinNotificationDetails();
-
-    await _localNotifications.show(
-      message.hashCode,
-      message.notification?.title,
-      message.notification?.body,
-      NotificationDetails(android: androidDetails, iOS: iosDetails),
-      payload: message.data['bug_id'],
+    const DarwinNotificationDetails iOSPlatformChannelSpecifics = DarwinNotificationDetails(
+      presentSound: false,
+      presentBadge: true,
+      presentAlert: true,
     );
+
+    const NotificationDetails platformChannelSpecifics = NotificationDetails(
+      android: androidPlatformChannelSpecifics,
+      iOS: iOSPlatformChannelSpecifics,
+    );
+
+    await _flutterLocalNotificationsPlugin.show(
+      DateTime.now().millisecondsSinceEpoch.remainder(100000),
+      title,
+      body,
+      platformChannelSpecifics,
+      payload: payload,
+    );
+    
+    // Mark this notification as shown
+    await _markAsShown(notificationKey);
   }
 
-  static void _handleNotificationTap(NotificationResponse details) {
-    // Navigate to bug details when notification is tapped
-    // You'll need to implement this using your navigation system
+  // Check if a notification has been shown
+  Future<bool> _hasBeenShown(String key) async {
+    return _prefs.getBool('notification_$key') ?? false;
+  }
+
+  // Mark a notification as shown
+  Future<void> _markAsShown(String key) async {
+    await _prefs.setBool('notification_$key', true);
+  }
+
+  // Update badge count without sound
+  Future<void> updateBadgeCount(int count) async {
+    if (count == 0) {
+      await clearAllNotifications();
+      return;
+    }
+    try {
+      await FlutterAppBadger.updateBadgeCount(count);
+    } catch (e) {
+      print('Error updating badge count: $e');
+    }
+  }
+
+  // Clear all notifications
+  Future<void> clearAllNotifications() async {
+    await _flutterLocalNotificationsPlugin.cancelAll();
+    await FlutterAppBadger.removeBadge();
+  }
+
+  // Reset shown notifications tracking
+  Future<void> resetNotificationTracking() async {
+    final keys = _prefs.getKeys().where((key) => key.startsWith('notification_'));
+    for (final key in keys) {
+      await _prefs.remove(key);
+    }
   }
 } 

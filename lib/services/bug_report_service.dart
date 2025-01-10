@@ -336,17 +336,17 @@ class BugReportService {
   Future<User?> getCurrentUser() async {
     const cacheKey = 'current_user';
     
-    // Clear cache if no token exists
-    final token = await TokenStorage.getToken();
-    if (token == null) {
-      _cache.remove(cacheKey);
-      return null;
-    }
-    
+    // Check cache first
     if (_cache.containsKey(cacheKey) && 
         _cacheExpiry[cacheKey]!.isAfter(DateTime.now())) {
       final cachedUser = _cache[cacheKey] as User?;
       return cachedUser;
+    }
+    
+    // Only proceed if we have a valid token
+    final token = await TokenStorage.getToken();
+    if (token == null) {
+      return null;
     }
 
     try {
@@ -356,16 +356,20 @@ class BugReportService {
       );
 
       if (response.statusCode == 200) {
-        final jsonData = jsonDecode(response.body);
-        final user = User.fromJson(jsonData);
+        final userData = json.decode(response.body);
+        final user = User.fromJson(userData);
+        
+        // Cache the user data
         _cache[cacheKey] = user;
-        _cacheExpiry[cacheKey] = DateTime.now().add(_cacheDuration);
+        _cacheExpiry[cacheKey] = DateTime.now().add(const Duration(minutes: 30));
+        
         return user;
+      } else {
+        print('Failed to get current user: ${response.statusCode}');
+        return null;
       }
-      return null;
     } catch (e) {
       print('Error getting current user: $e');
-      _cache.remove(cacheKey);
       return null;
     }
   }
@@ -447,19 +451,19 @@ class BugReportService {
       throw Exception('No authentication token found');
     }
 
-    // Ensure users are loaded in cache
-    if (!_cache.containsKey('users')) {
-      await fetchUsers();
-    }
-
-    // Get recipient name from users cache
-    final users = _cache['users'] as List<User>;
-    final recipientUser = users.firstWhere(
-      (user) => user.id.toString() == recipientId,
-      orElse: () => throw Exception('Recipient user not found'),
-    );
-
     try {
+      // Ensure users are loaded in cache
+      if (!_cache.containsKey('users')) {
+        await fetchUsers();
+      }
+
+      // Get recipient name from users cache
+      final users = _cache['users'] as List<User>;
+      final recipientUser = users.firstWhere(
+        (user) => user.id.toString() == recipientId,
+        orElse: () => throw Exception('Recipient user not found'),
+      );
+
       // Build form data with required fields
       final formData = FormData.fromMap({
         'description': description,
@@ -508,14 +512,32 @@ class BugReportService {
             'Authorization': 'Bearer $token',
             'Accept': 'application/json',
           },
-          validateStatus: (status) => status! < 500,
+          validateStatus: (status) {
+            // Accept any status code to handle errors properly
+            return true;
+          },
+          receiveTimeout: const Duration(seconds: 30),
+          sendTimeout: const Duration(seconds: 30),
         ),
       );
 
-      if (response.statusCode != 200 && response.statusCode != 201) {
+      // Handle different status codes
+      if (response.statusCode == 401) {
+        // Don't throw on unauthorized, just return error
+        throw Exception('Session expired. Please try again.');
+      } else if (response.statusCode == 413) {
+        throw Exception('Image file is too large. Please use a smaller image.');
+      } else if (response.statusCode! >= 400) {
         final errorDetail = response.data is Map ? response.data['detail'] : response.statusMessage;
         throw Exception('Failed to upload bug report: $errorDetail');
       }
+
+      // Success case
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        return;
+      }
+
+      throw Exception('Failed to upload bug report: Unexpected error');
     } catch (e) {
       print('Error uploading bug report: $e');
       rethrow;
@@ -735,12 +757,22 @@ class BugReportService {
   }
 
   void _clearUserRelatedCaches() {
-    print('Clearing all caches');
-    _cache.clear();  // Clear all cached data
+    print('Clearing caches except user data');
+    // Don't clear user-related data
+    _cache.removeWhere((key, _) => 
+      key != 'current_user' && 
+      !key.startsWith('user_') && 
+      key != 'users'
+    );
     _commentCache.clear();
     _processedCommentIds.clear();
     _lastCommentRefresh = null;
-    _cacheExpiry.clear();
+    // Don't clear cache expiry for user data
+    _cacheExpiry.removeWhere((key, _) => 
+      key != 'current_user' && 
+      !key.startsWith('user_') && 
+      key != 'users'
+    );
   }
 
   void _handleProjectEvent(String action, Map<String, dynamic> payload) {

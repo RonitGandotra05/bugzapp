@@ -4,13 +4,15 @@ import '../screens/user_management_screen.dart';
 import '../screens/project_management_screen.dart';
 
 class AppDrawer extends StatelessWidget {
-  final bool isAdmin;
   final VoidCallback onLogout;
+  final String? userName;
+  final bool isAdmin;
 
   const AppDrawer({
     Key? key,
-    required this.isAdmin,
     required this.onLogout,
+    this.userName,
+    this.isAdmin = false,
   }) : super(key: key);
 
   @override
@@ -44,12 +46,12 @@ class AppDrawer extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.bug_report,
                     size: 48,
                     color: Colors.white,
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
                     'BugZapp',
                     style: GoogleFonts.poppins(
@@ -58,12 +60,22 @@ class AppDrawer extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+                  if (userName != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      userName!,
+                      style: GoogleFonts.poppins(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
             if (isAdmin) ...[
               ListTile(
-                leading: Icon(Icons.admin_panel_settings),
+                leading: const Icon(Icons.admin_panel_settings),
                 title: Text(
                   'User Management',
                   style: GoogleFonts.poppins(),
@@ -79,7 +91,7 @@ class AppDrawer extends StatelessWidget {
                 },
               ),
               ListTile(
-                leading: Icon(Icons.folder_special),
+                leading: const Icon(Icons.folder_special),
                 title: Text(
                   'Project Management',
                   style: GoogleFonts.poppins(),
@@ -96,7 +108,7 @@ class AppDrawer extends StatelessWidget {
               ),
             ],
             ListTile(
-              leading: Icon(Icons.logout),
+              leading: const Icon(Icons.logout),
               title: Text(
                 'Logout',
                 style: GoogleFonts.poppins(),
