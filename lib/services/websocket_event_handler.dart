@@ -7,6 +7,7 @@ import '../models/user.dart';
 import '../services/bug_report_service.dart';
 import '../services/project_service.dart';
 import '../services/user_service.dart';
+import 'package:flutter/material.dart';
 
 enum WebSocketEventType {
   bugReport,
@@ -94,16 +95,36 @@ class WebSocketEventHandler {
       switch (action) {
         case 'created':
         case 'updated':
+          print('Processing ${action} bug report #${bugReport.id}');
           _bugReportService.updateBugReportCache(bugReport);
           _bugReportController.add(bugReport);
+          
+          // Send notification for new bugs
+          final lifecycleState = WidgetsBinding.instance.lifecycleState;
+          if (action == 'created' || 
+              lifecycleState == AppLifecycleState.paused || 
+              lifecycleState == AppLifecycleState.inactive || 
+              lifecycleState == AppLifecycleState.detached) {
+            NotificationService().showBugNotification(
+              title: 'New Bug Report #${bugReport.id}',
+              body: '${bugReport.creator ?? "Someone"} reported: ${bugReport.description}',
+              bugId: bugReport.id.toString(),
+              creatorName: bugReport.creator,
+              isInApp: lifecycleState == AppLifecycleState.resumed,
+            );
+          }
           break;
         case 'deleted':
+          print('Processing deleted bug report #${bugReport.id}');
           _bugReportService.deleteBugReportFromCache(bugReport.id);
           _bugReportController.add(bugReport);
           break;
+        default:
+          print('Unknown bug report action: $action');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
       print('Error handling bug report event: $e');
+      print('Stack trace: $stackTrace');
     }
   }
 
@@ -111,6 +132,15 @@ class WebSocketEventHandler {
     try {
       print('Handling comment event: $action');
       final comment = Comment.fromJson(payload['comment'] ?? payload);
+      
+      // Check if we've already processed this comment
+      if (_processedCommentIds.contains(comment.id)) {
+        print('Comment ${comment.id} already processed, skipping');
+        return;
+      }
+      
+      // Add to processed set
+      _processedCommentIds.add(comment.id);
       
       switch (action) {
         case 'created':

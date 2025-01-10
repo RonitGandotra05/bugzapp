@@ -1,130 +1,288 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:just_audio/just_audio.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_app_badger/flutter_app_badger.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter/material.dart';
+import 'package:timezone/timezone.dart' as tz;
+import 'package:timezone/data/latest.dart' as tz;
+import 'navigation_service.dart';
+import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 class NotificationService {
-  static final NotificationService _instance = NotificationService._internal();
-  final FlutterLocalNotificationsPlugin _flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
+  static final NotificationService _instance = NotificationService._();
+  factory NotificationService() => _instance;
+  NotificationService._();
+
+  final FlutterLocalNotificationsPlugin _notifications = FlutterLocalNotificationsPlugin();
   late SharedPreferences _prefs;
+  
+  // Channel IDs
+  static const String _bugChannelId = 'bug_notifications';
+  static const String _commentChannelId = 'comment_notifications';
+  
+  // Notification IDs
+  static const int _bugNotificationId = 1;
+  static const int _commentNotificationId = 2;
 
-  factory NotificationService() {
-    return _instance;
+  // Get vibration pattern based on platform
+  Int64List? get _vibrationPattern {
+    if (kIsWeb || !Platform.isAndroid) return null;
+    return Int64List.fromList([0, 500, 200, 500]);
   }
-
-  NotificationService._internal();
 
   Future<void> initialize() async {
-    _prefs = await SharedPreferences.getInstance();
-    
-    const AndroidInitializationSettings initializationSettingsAndroid =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
-        
-    const DarwinInitializationSettings initializationSettingsIOS = DarwinInitializationSettings(
-      requestSoundPermission: false,
-      requestBadgePermission: true,
+    if (kIsWeb) {
+      print('Notifications are not fully supported on web platform');
+      return;
+    }
+
+    // Initialize timezone
+    tz.initializeTimeZones();
+
+    // Initialize notifications
+    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const iosSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
+      requestBadgePermission: true,
+      requestSoundPermission: true,
+    );
+    
+    await _notifications.initialize(
+      const InitializationSettings(
+        android: androidSettings,
+        iOS: iosSettings,
+      ),
+      onDidReceiveNotificationResponse: _handleNotificationTap,
     );
 
-    const InitializationSettings initializationSettings = InitializationSettings(
-      android: initializationSettingsAndroid,
-      iOS: initializationSettingsIOS,
+    // Create notification channels for Android
+    if (Platform.isAndroid) {
+      await _createNotificationChannels();
+    }
+
+    // Initialize SharedPreferences
+    _prefs = await SharedPreferences.getInstance();
+  }
+
+  Future<void> _createNotificationChannels() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+
+    final androidPlugin = _notifications.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+        
+    if (androidPlugin == null) return;
+
+    await androidPlugin.createNotificationChannel(
+      AndroidNotificationChannel(
+        _bugChannelId,
+        'Bug Reports',
+        description: 'Notifications for new bug reports',
+        importance: Importance.high,
+        enableVibration: true,
+        playSound: true,
+        vibrationPattern: _vibrationPattern,
+      ),
     );
 
-    await _flutterLocalNotificationsPlugin.initialize(
-      initializationSettings,
-      onDidReceiveNotificationResponse: (NotificationResponse notificationResponse) {
-        // Handle notification tap
-      },
+    await androidPlugin.createNotificationChannel(
+      AndroidNotificationChannel(
+        _commentChannelId,
+        'Comments',
+        description: 'Notifications for new comments',
+        importance: Importance.high,
+        enableVibration: true,
+        playSound: true,
+        vibrationPattern: _vibrationPattern,
+      ),
     );
   }
 
-  // Show notification without sound and track read status
+  bool get _isAndroid => !kIsWeb && Platform.isAndroid;
+
+  // Generic showNotification method for backward compatibility
   Future<void> showNotification({
     required String title,
     required String body,
-    String? payload,
-    bool playSound = false,
+    required Map<String, dynamic> payload,
+    bool isInApp = false,
   }) async {
-    // Create a unique key for this notification
-    final String notificationKey = '${title}_${body}_${payload ?? ''}';
-    
-    // Check if this notification was already shown
-    final bool wasShown = await _hasBeenShown(notificationKey);
-    if (wasShown) {
-      return; // Skip if already shown
-    }
+    final notificationId = DateTime.now().millisecondsSinceEpoch % 100000;
 
-    const AndroidNotificationDetails androidPlatformChannelSpecifics = AndroidNotificationDetails(
-      'bug_channel',
-      'Bug Reports',
-      channelDescription: 'Notifications for bug reports and updates',
-      importance: Importance.high,
-      priority: Priority.high,
-      playSound: false,
-      enableVibration: false,
-      styleInformation: BigTextStyleInformation(''),
-    );
-
-    const DarwinNotificationDetails iOSPlatformChannelSpecifics = DarwinNotificationDetails(
-      presentSound: false,
-      presentBadge: true,
-      presentAlert: true,
-    );
-
-    const NotificationDetails platformChannelSpecifics = NotificationDetails(
-      android: androidPlatformChannelSpecifics,
-      iOS: iOSPlatformChannelSpecifics,
-    );
-
-    await _flutterLocalNotificationsPlugin.show(
-      DateTime.now().millisecondsSinceEpoch.remainder(100000),
+    await _notifications.show(
+      notificationId,
       title,
       body,
-      platformChannelSpecifics,
-      payload: payload,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _bugChannelId,
+          'Bug Reports',
+          channelDescription: 'Notifications for new bug reports',
+          importance: Importance.high,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+          playSound: !isInApp,
+          enableVibration: !isInApp,
+          sound: !isInApp ? const RawResourceAndroidNotificationSound('notification_sound') : null,
+          color: Colors.purple,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: !isInApp,
+          sound: !isInApp ? 'notification_sound.aiff' : null,
+        ),
+      ),
+      payload: json.encode(payload),
     );
-    
-    // Mark this notification as shown
-    await _markAsShown(notificationKey);
   }
 
-  // Check if a notification has been shown
-  Future<bool> _hasBeenShown(String key) async {
-    return _prefs.getBool('notification_$key') ?? false;
-  }
-
-  // Mark a notification as shown
-  Future<void> _markAsShown(String key) async {
-    await _prefs.setBool('notification_$key', true);
-  }
-
-  // Update badge count without sound
-  Future<void> updateBadgeCount(int count) async {
-    if (count == 0) {
-      await clearAllNotifications();
+  Future<void> showBugNotification({
+    required String title,
+    required String body,
+    required String bugId,
+    String? creatorName,
+    bool isInApp = false,
+  }) async {
+    if (kIsWeb) {
+      print('Notifications are not supported on web platform');
       return;
     }
+
+    final notificationId = int.parse(bugId);
+    final notificationKey = 'bug_$bugId';
+
+    // Check if this notification was already shown
+    if (await _wasNotificationShown(notificationKey)) return;
+
+    await _notifications.show(
+      notificationId,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _bugChannelId,
+          'Bug Reports',
+          channelDescription: 'Notifications for new bug reports',
+          importance: Importance.high,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+          playSound: !isInApp,
+          enableVibration: !isInApp,
+          vibrationPattern: !isInApp ? _vibrationPattern : null,
+          sound: !isInApp ? const RawResourceAndroidNotificationSound('notification_sound') : null,
+          fullScreenIntent: !isInApp,
+          category: AndroidNotificationCategory.message,
+          color: Colors.purple,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: !isInApp,
+          sound: !isInApp ? 'notification_sound.aiff' : null,
+          interruptionLevel: InterruptionLevel.active,
+        ),
+      ),
+      payload: json.encode({
+        'type': 'bug',
+        'id': bugId,
+        'creator': creatorName,
+      }),
+    );
+
+    await _markNotificationAsShown(notificationKey);
+  }
+
+  Future<void> showCommentNotification({
+    required String title,
+    required String body,
+    required String bugId,
+    String? commenterName,
+    bool isInApp = false,
+  }) async {
+    final notificationId = int.parse(bugId) + 1000; // Offset to avoid ID conflicts
+    final notificationKey = 'comment_${bugId}_$commenterName';
+
+    // Check if this notification was already shown
+    if (await _wasNotificationShown(notificationKey)) return;
+
+    await _notifications.show(
+      notificationId,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _commentChannelId,
+          'Comments',
+          channelDescription: 'Notifications for new comments',
+          importance: Importance.high,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+          playSound: !isInApp,
+          enableVibration: !isInApp,
+          sound: !isInApp ? const RawResourceAndroidNotificationSound('notification_sound') : null,
+          color: Colors.purple,
+        ),
+        iOS: DarwinNotificationDetails(
+          presentAlert: true,
+          presentBadge: true,
+          presentSound: !isInApp,
+          sound: !isInApp ? 'notification_sound.aiff' : null,
+        ),
+      ),
+      payload: json.encode({
+        'type': 'comment',
+        'bugId': bugId,
+        'commenter': commenterName,
+      }),
+    );
+
+    await _markNotificationAsShown(notificationKey);
+  }
+
+  Future<bool> _wasNotificationShown(String key) async {
+    final shownNotifications = _prefs.getStringList('shown_notifications') ?? [];
+    return shownNotifications.contains(key);
+  }
+
+  Future<void> _markNotificationAsShown(String key) async {
+    final shownNotifications = _prefs.getStringList('shown_notifications') ?? [];
+    shownNotifications.add(key);
+    // Keep only last 100 notifications to prevent excessive storage use
+    if (shownNotifications.length > 100) {
+      shownNotifications.removeRange(0, shownNotifications.length - 100);
+    }
+    await _prefs.setStringList('shown_notifications', shownNotifications);
+  }
+
+  void _handleNotificationTap(NotificationResponse response) {
+    if (response.payload == null) return;
+
     try {
-      await FlutterAppBadger.updateBadgeCount(count);
+      final payload = json.decode(response.payload!);
+      if (payload['type'] == 'bug') {
+        NavigationService.navigateToBug(int.parse(payload['id']));
+      } else if (payload['type'] == 'comment') {
+        NavigationService.navigateToBug(int.parse(payload['bugId']));
+      }
     } catch (e) {
-      print('Error updating badge count: $e');
+      print('Error handling notification tap: $e');
     }
   }
 
-  // Clear all notifications
+  Future<void> updateBadgeCount(int count) async {
+    if (!_isAndroid) {
+      await _notifications.resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin>()?.requestPermissions(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    }
+  }
+
   Future<void> clearAllNotifications() async {
-    await _flutterLocalNotificationsPlugin.cancelAll();
-    await FlutterAppBadger.removeBadge();
-  }
-
-  // Reset shown notifications tracking
-  Future<void> resetNotificationTracking() async {
-    final keys = _prefs.getKeys().where((key) => key.startsWith('notification_'));
-    for (final key in keys) {
-      await _prefs.remove(key);
-    }
+    await _notifications.cancelAll();
+    await updateBadgeCount(0);
   }
 } 

@@ -27,6 +27,7 @@ class BugReport {
   final String? projectName;
   final String? tabUrl;
   final List<String> ccRecipients;
+  final int commentCount;
 
   BugReport({
     required this.id,
@@ -44,6 +45,7 @@ class BugReport {
     this.projectName,
     this.tabUrl,
     this.ccRecipients = const [],
+    this.commentCount = 0,
   });
 
   factory BugReport.fromJson(Map<String, dynamic> json) {
@@ -66,10 +68,8 @@ class BugReport {
     Map<String, dynamic>? projectData = json['project'] is Map ? json['project'] as Map<String, dynamic> : null;
     String? projectName = projectData?['name'] ?? json['project_name']?.toString();
 
-    // Debug print for CC recipients
-    print('Raw CC Recipients: ${json['cc_recipients']}');
+    // Parse CC recipients without debug prints
     final ccRecipients = (json['cc_recipients'] as List<dynamic>?)?.cast<String>() ?? [];
-    print('Parsed CC Recipients: $ccRecipients');
 
     return BugReport(
       id: json['id'] as int,
@@ -87,6 +87,7 @@ class BugReport {
       creatorId: creatorData?['id'] ?? json['creator_id'],
       recipientId: recipientData?['id'] ?? json['recipient_id'],
       projectId: projectData?['id'] ?? json['project_id'],
+      commentCount: json['comment_count'] as int? ?? 0,
     );
   }
 
@@ -138,4 +139,6 @@ class BugReport {
         return Colors.green;
     }
   }
+
+  bool get hasComments => commentCount > 0;
 } 

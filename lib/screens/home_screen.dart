@@ -43,10 +43,11 @@ extension WidgetPaddingX on Widget {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  final int? initialBugId;
+  const HomeScreen({Key? key, this.initialBugId}) : super(key: key);
 
   @override
-  _HomeScreenState createState() => _HomeScreenState();
+  HomeScreenState createState() => HomeScreenState();
 }
 
 class BugFilterManager {
@@ -137,7 +138,7 @@ class BugFilterManager {
     .length;
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> {
   final _bugReportService = BugReportService();
   final _searchController = TextEditingController();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -202,6 +203,13 @@ class _HomeScreenState extends State<HomeScreen> {
     );
     _loadData();
     _setupRealTimeUpdates();
+    
+    // Handle initial bug ID if provided
+    if (widget.initialBugId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        scrollToBugCard(widget.initialBugId!);
+      });
+    }
   }
 
   void _setupRealTimeUpdates() {
@@ -210,23 +218,24 @@ class _HomeScreenState extends State<HomeScreen> {
       (bugReport) {
         if (mounted) {
           setState(() {
-            print('Received bug report update: ${bugReport.id} - ${bugReport.description}');
-            
-            // Update or add the bug report in the list
             final index = _bugReports.indexWhere((b) => b.id == bugReport.id);
             if (index != -1) {
+              // Update existing bug report
               _bugReports[index] = bugReport;
-              print('Updated existing bug report at index $index');
+              print('Updated existing bug report #${bugReport.id}');
             } else {
-              _bugReports.add(bugReport);
-              print('Added new bug report to list');
+              // Add new bug report
+              _bugReports.insert(0, bugReport);
+              print('Added new bug report #${bugReport.id}');
               
               // Only show notification for new bug reports and if not created by current user
               if (_currentUser?.id != bugReport.creatorId) {
-                NotificationService().showNotification(
-                  title: 'New Bug Report',
-                  body: 'From ${bugReport.creatorName}: ${bugReport.description}',
-                  payload: bugReport.id.toString(),
+                NotificationService().showBugNotification(
+                  title: 'New Bug Report #${bugReport.id}',
+                  body: '${bugReport.creator ?? "Someone"} reported: ${bugReport.description}',
+                  bugId: bugReport.id.toString(),
+                  creatorName: bugReport.creator,
+                  isInApp: true,
                 );
               }
             }
@@ -238,87 +247,18 @@ class _HomeScreenState extends State<HomeScreen> {
             
             // Update filter manager
             _updateFilterManager();
-            _error = null; // Clear any existing errors
-            
-            print('Current bug reports count: ${_bugReports.length}');
-            print('Filtered bug reports count: ${_filterManager.searchFiltered.length}');
           });
         }
       },
-      onError: (e) {
-        if (mounted) {
-          setState(() => _error = 'Error receiving updates: $e');
-        }
+      onError: (error) {
+        print('Error in bug report stream: $error');
       },
     );
 
-    // Listen for comment updates
-    _bugReportService.commentStream.listen((comment) {
+    // Refresh bug reports periodically to ensure sync
+    Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) {
-        setState(() {
-          print('Received comment update for bug ${comment.bugReportId}');
-          
-          // Only show notification if the comment is not from current user
-          if (_currentUser?.id != comment.userId) {
-            NotificationService().showNotification(
-              title: 'New Comment',
-              body: '${comment.userName} commented on bug #${comment.bugReportId}',
-              payload: comment.bugReportId.toString(),
-            );
-          }
-        });
-      }
-    });
-
-    // Update badge count periodically
-    Timer.periodic(const Duration(minutes: 1), (timer) {
-      if (mounted) {
-        final unreadCount = _bugReports.where((bug) => 
-          bug.creatorId != _currentUser?.id && 
-          !bug.isRead && 
-          bug.modifiedDate.isAfter(DateTime.now().subtract(const Duration(days: 1)))
-        ).length;
-        
-        if (unreadCount > 0) {
-          NotificationService().updateBadgeCount(unreadCount);
-        } else {
-          NotificationService().clearAllNotifications();
-        }
-      }
-    });
-
-    // Listen for project updates
-    _bugReportService.projectStream.listen((project) {
-      if (mounted) {
-        setState(() {
-          final index = _projects.indexWhere((p) => p.id == project.id);
-          if (index != -1) {
-            _projects[index] = project;
-          } else {
-            _projects.add(project);
-          }
-          _availableProjects = _projects; // Update available projects for bug creation
-        });
-      }
-    });
-
-    // Listen for user updates
-    _bugReportService.userStream.listen((user) {
-      if (mounted) {
-        setState(() {
-          final index = _users.indexWhere((u) => u.id == user.id);
-          if (index != -1) {
-            _users[index] = user;
-          } else {
-            _users.add(user);
-          }
-          _availableUsers = _users; // Update available users for bug assignment
-          
-          // Update current user if it's the same user
-          if (_currentUser?.id == user.id) {
-            _currentUser = user;
-          }
-        });
+        _refreshBugReports();
       }
     });
   }
@@ -368,28 +308,31 @@ class _HomeScreenState extends State<HomeScreen> {
       _isLoading = true;
       _error = null;
     });
+    
     try {
       final currentUser = await _bugReportService.getCurrentUser();
       final users = await _bugReportService.fetchUsers();
       final projects = await _bugReportService.fetchProjects();
       final bugReports = await _bugReportService.getAllBugReports();
       
+      // Load all comments at once
+      await _bugReportService.loadAllComments();
+      
       if (mounted) {
         setState(() {
           _currentUser = currentUser;
+          _userName = currentUser?.name ?? '';
           _users = users;
           _availableUsers = users;
           _projects = projects;
           _bugReports = bugReports;
           _isLoading = false;
-          _error = null;
           
           // Update filter manager with fresh data
           _updateFilterManager();
         });
       }
     } catch (e) {
-      print('Error loading data: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -407,19 +350,23 @@ class _HomeScreenState extends State<HomeScreen> {
   void _handleStatusFilterChange(BugFilterType filter) {
     setState(() {
       _currentFilter = filter;
+      // Update filter manager with existing data
+      _updateFilterManager();
     });
   }
 
   void _handleUserFilterChange(BugFilter filter) {
     setState(() {
       _currentBugFilter = filter;
+      // Update filter manager with existing data
+      _updateFilterManager();
     });
-    _loadData(); // Reload data with new filter
   }
 
   void _toggleSortOrder() {
     setState(() {
       _isAscendingOrder = !_isAscendingOrder;
+      // No need to reload data, just update UI with cached data
     });
   }
 
@@ -549,64 +496,30 @@ class _HomeScreenState extends State<HomeScreen> {
       // Check camera permission
       final status = await Permission.camera.status;
       if (status.isDenied || status.isRestricted) {
-        // Show explanation dialog before requesting permission
-        if (mounted) {
-          final shouldRequest = await showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: Text(
-                'Camera Permission Required',
-                style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+        // Request permission directly without showing dialog first
+        final result = await Permission.camera.request();
+        
+        if (result.isDenied || result.isPermanentlyDenied) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  result.isPermanentlyDenied
+                      ? 'Camera permission is required. Please enable it in app settings.'
+                      : 'Camera permission is required to take photos',
+                ),
+                backgroundColor: Colors.red,
+                action: result.isPermanentlyDenied
+                    ? SnackBarAction(
+                        label: 'Settings',
+                        onPressed: () => openAppSettings(),
+                        textColor: Colors.white,
+                      )
+                    : null,
               ),
-              content: Text(
-                'BugZapp needs camera access to capture bug report screenshots. Would you like to grant camera access?',
-                style: GoogleFonts.poppins(),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context, false),
-                  child: Text(
-                    'Not Now',
-                    style: GoogleFonts.poppins(),
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: () => Navigator.pop(context, true),
-                  child: Text(
-                    'Grant Access',
-                    style: GoogleFonts.poppins(),
-                  ),
-                ),
-              ],
-            ),
-          ) ?? false;
-
-          if (!shouldRequest) return;
-
-          // Request permission
-          final result = await Permission.camera.request();
-          if (result.isDenied || result.isPermanentlyDenied) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    result.isPermanentlyDenied
-                        ? 'Camera permission is required. Please enable it in app settings.'
-                        : 'Camera permission is required to take photos',
-                  ),
-                  backgroundColor: Colors.red,
-                  action: result.isPermanentlyDenied
-                      ? SnackBarAction(
-                          label: 'Settings',
-                          onPressed: () => openAppSettings(),
-                          textColor: Colors.white,
-                        )
-                      : null,
-                ),
-              );
-            }
-            return;
+            );
           }
+          return;
         }
       } else if (status.isPermanentlyDenied) {
         if (mounted) {
@@ -625,15 +538,17 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
+      // Now that we have permission, take the picture
       final ImagePicker picker = ImagePicker();
       final XFile? photo = await picker.pickImage(
         source: ImageSource.camera,
         imageQuality: 85,
         maxWidth: 1920,
         maxHeight: 1080,
+        preferredCameraDevice: CameraDevice.rear,
       );
       
-      if (photo != null && mounted) {
+      if (photo != null) {
         // Process image in a separate isolate if possible
         try {
           final file = File(photo.path);
@@ -1095,61 +1010,30 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _scrollToBugCard(int bugId) {
-    final index = _sortedAndFilteredBugReports.indexWhere((bug) => bug.id == bugId);
-    if (index != -1) {
-      // Ensure we have a key for this bug card
-      _bugCardKeys[bugId] = _bugCardKeys[bugId] ?? GlobalKey();
-      
-      setState(() {
-        // Reset filters to show all bugs
-        _currentBugFilter = BugFilter.all;
-        _currentFilter = BugFilterType.all;
-        _searchQuery = '';
-        _searchController.clear();
-        _selectedProjectIds.clear();
-        _updateFilterManager();
-        _highlightedBugId = bugId;
-      });
+  void scrollToBugCard(int bugId) {
+    setState(() {
+      _highlightedBugId = bugId;
+    });
 
-      // Wait for the next frame to ensure the ListView is built
-      WidgetsBinding.instance.addPostFrameCallback((_) async {
-        // Wait a bit more to ensure all cards are properly laid out
-        await Future.delayed(const Duration(milliseconds: 100));
+    // Wait for the next frame to ensure the ListView is built
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_bugCardKeys[bugId]?.currentContext != null) {
+        Scrollable.ensureVisible(
+          _bugCardKeys[bugId]!.currentContext!,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
         
-        final context = _listViewKey.currentContext;
-        if (context != null) {
-          final RenderBox listViewBox = context.findRenderObject() as RenderBox;
-          final listViewOffset = listViewBox.localToGlobal(Offset.zero);
-          
-          // Find the target card's render box using its GlobalKey
-          final cardContext = _bugCardKeys[bugId]?.currentContext;
-          if (cardContext != null) {
-            final targetCard = cardContext.findRenderObject() as RenderBox;
-            final targetCardOffset = targetCard.localToGlobal(Offset.zero);
-            
-            // Calculate the scroll offset needed
-            final scrollOffset = targetCardOffset.dy - listViewOffset.dy;
-            
-            // Scroll to the target position with some padding
-            _scrollController.animateTo(
-              _scrollController.offset + scrollOffset - 20, // Add padding to ensure card is fully visible
-              duration: const Duration(milliseconds: 500),
-              curve: Curves.easeInOut,
-            ).then((_) {
-              // Remove highlight after 2 seconds
-              Future.delayed(const Duration(seconds: 2), () {
-                if (mounted) {
-                  setState(() {
-                    _highlightedBugId = null;
-                  });
-                }
-              });
+        // Add a delayed removal of highlight
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) {
+            setState(() {
+              _highlightedBugId = null;
             });
           }
-        }
-      });
-    }
+        });
+      }
+    });
   }
 
   void _toggleBugSelection(BugReport bug, bool selected) {
@@ -1328,6 +1212,28 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Add refresh method
+  Future<void> _refreshBugReports() async {
+    try {
+      await _bugReportService.refreshBugReports();
+      if (mounted) {
+        setState(() {
+          // Update bug reports from the service's cache
+          _bugReports = _bugReportService.getCachedBugReports();
+          // Update filter manager
+          _updateFilterManager();
+        });
+      }
+    } catch (e) {
+      print('Error refreshing bug reports: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error refreshing bug reports: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -1354,7 +1260,7 @@ class _HomeScreenState extends State<HomeScreen> {
           NotificationBell(
             bugReportStream: _bugReportService.bugReportStream,
             commentStream: _bugReportService.commentStream,
-            onBugTap: _scrollToBugCard,
+            onBugTap: scrollToBugCard,
           ),
           const SizedBox(width: 8),
         ],
@@ -1537,7 +1443,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 duration: const Duration(milliseconds: 200),
                 left: 16,
                 bottom: showButton ? 16 : -60,
-                child: FloatingActionButton.small(
+                child: FloatingActionButton(
+                  heroTag: 'scrollToTopButton',
                   onPressed: () {
                     _scrollController.animateTo(
                       0,
@@ -1546,7 +1453,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     );
                   },
                   backgroundColor: Colors.purple[400],
-                  child: const Icon(Icons.arrow_upward),
+                  elevation: 4,
+                  child: const Icon(
+                    Icons.arrow_upward,
+                    color: Colors.white,
+                  ),
                 ),
               );
             },
@@ -1554,8 +1465,14 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'addBugButton',
         onPressed: () => _showAddBugReport(context),
-        child: const Icon(Icons.add),
+        backgroundColor: Colors.purple[400],
+        elevation: 4,
+        child: const Icon(
+          Icons.add,
+          color: Colors.white,
+        ),
       ),
     );
   }

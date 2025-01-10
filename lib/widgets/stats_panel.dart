@@ -23,7 +23,7 @@ class StatsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
@@ -34,100 +34,90 @@ class StatsPanel extends StatelessWidget {
           ],
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildStatCard(
-                'Total Bug\nReports',
-                totalBugs.toString(),
-                Icons.bug_report,
-                Colors.blue[100]!,
-                Colors.blue,
-                () => onFilterChange(BugFilterType.all),
-                isSelected: currentFilter == BugFilterType.all,
-              ),
-              _buildStatCard(
-                'Resolved\nBugs',
-                resolvedBugs.toString(),
-                Icons.check_circle_outline,
-                Colors.green[100]!,
-                Colors.green,
-                () => onFilterChange(BugFilterType.resolved),
-                isSelected: currentFilter == BugFilterType.resolved,
-              ),
-              _buildStatCard(
-                'Pending\nBugs',
-                pendingBugs.toString(),
-                Icons.pending_actions,
-                Colors.orange[100]!,
-                Colors.orange,
-                () => onFilterChange(BugFilterType.pending),
-                isSelected: currentFilter == BugFilterType.pending,
-              ),
-            ],
+          // Total Bugs
+          Expanded(
+            child: _buildStatCard(
+              icon: Icons.bug_report,
+              count: totalBugs,
+              label: 'Total Bug\nReports',
+              isSelected: currentFilter == BugFilterType.all,
+              onTap: () => onFilterChange(BugFilterType.all),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Resolved Bugs
+          Expanded(
+            child: _buildStatCard(
+              icon: Icons.check_circle_outline,
+              count: resolvedBugs,
+              label: 'Resolved\nBugs',
+              isSelected: currentFilter == BugFilterType.resolved,
+              onTap: () => onFilterChange(BugFilterType.resolved),
+              iconColor: Colors.green,
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Pending Bugs
+          Expanded(
+            child: _buildStatCard(
+              icon: Icons.pending_actions,
+              count: pendingBugs,
+              label: 'Pending\nBugs',
+              isSelected: currentFilter == BugFilterType.pending,
+              onTap: () => onFilterChange(BugFilterType.pending),
+              iconColor: Colors.orange,
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatCard(
-    String title,
-    String value,
-    IconData icon,
-    Color bgColor,
-    MaterialColor? accentColor,
-    VoidCallback onTap,
-    {bool isSelected = false}
-  ) {
-    return Expanded(
-      child: GestureDetector(
+  Widget _buildStatCard({
+    required IconData icon,
+    required int count,
+    required String label,
+    required bool isSelected,
+    required VoidCallback onTap,
+    Color? iconColor,
+  }) {
+    return Material(
+      color: isSelected ? Colors.purple[400] : Colors.white,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
         onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
         child: Container(
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
           decoration: BoxDecoration(
-            color: isSelected ? accentColor?.withOpacity(0.1) : Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isSelected ? accentColor ?? Colors.grey : Colors.transparent,
-              width: 2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.05),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
+            borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
                 icon,
-                color: accentColor,
+                color: isSelected ? Colors.white : (iconColor ?? Colors.purple[400]),
                 size: 28,
               ),
               const SizedBox(height: 8),
               Text(
-                value,
+                count.toString(),
                 style: GoogleFonts.poppins(
                   fontSize: 24,
                   fontWeight: FontWeight.w600,
-                  color: accentColor,
+                  color: isSelected ? Colors.white : Colors.black87,
                 ),
               ),
-              const SizedBox(height: 4),
               Text(
-                title,
+                label,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.poppins(
                   fontSize: 12,
-                  color: Colors.grey[600],
+                  color: isSelected ? Colors.white : Colors.grey[600],
                   height: 1.2,
                 ),
               ),

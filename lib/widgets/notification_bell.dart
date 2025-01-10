@@ -154,7 +154,8 @@ class _NotificationBellState extends State<NotificationBell> {
       _notificationService.showNotification(
         title: 'New Bug Report #${bugReport.id}',
         body: '${bugReport.creator ?? "Someone"} reported: ${bugReport.description}',
-        payload: notificationId,
+        payload: {'type': 'bug', 'id': notificationId},
+        isInApp: true,
       );
     });
 
@@ -175,7 +176,8 @@ class _NotificationBellState extends State<NotificationBell> {
       _notificationService.showNotification(
         title: 'New Comment on Bug #${comment.bugReportId}',
         body: '${comment.userName}: ${comment.comment}',
-        payload: notificationId,
+        payload: {'type': 'comment', 'id': notificationId},
+        isInApp: true,
       );
     });
   }
@@ -205,20 +207,14 @@ class _NotificationBellState extends State<NotificationBell> {
   }
 
   String _formatTimestamp(DateTime timestamp) {
-    final now = DateTime.now();
-    final difference = now.difference(timestamp);
+    // Always show IST time
+    final ist = timestamp.add(const Duration(hours: 5, minutes: 30));
+    return '${ist.day.toString().padLeft(2, '0')}/${ist.month.toString().padLeft(2, '0')}/${ist.year} ${ist.hour.toString().padLeft(2, '0')}:${ist.minute.toString().padLeft(2, '0')} IST';
+  }
 
-    if (difference.inMinutes < 1) {
-      return 'Just now';
-    } else if (difference.inHours < 1) {
-      return '${difference.inMinutes}m ago';
-    } else if (difference.inDays < 1) {
-      return '${difference.inHours}h ago';
-    } else if (difference.inDays < 7) {
-      return '${difference.inDays}d ago';
-    } else {
-      return '${timestamp.day}/${timestamp.month}/${timestamp.year}';
-    }
+  String _getTimeDisplay(DateTime utcTime) {
+    // Always show IST time instead of relative time
+    return _formatTimestamp(utcTime);
   }
 
   Future<void> _showNotificationMenu(BuildContext context) async {

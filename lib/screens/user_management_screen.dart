@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/bug_report_service.dart';
 import '../models/user.dart';
+import 'dart:async';
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({Key? key}) : super(key: key);
@@ -14,6 +15,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   final BugReportService _bugReportService = BugReportService();
   List<User> _users = [];
   bool _isLoading = true;
+  StreamSubscription<User>? _userStreamSubscription;
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -24,6 +26,21 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   void initState() {
     super.initState();
     _loadUsers();
+    // Subscribe to user stream for real-time updates
+    _userStreamSubscription = _bugReportService.userStream.listen((newUser) {
+      setState(() {
+        // Add the new user to the list if not already present
+        if (!_users.any((user) => user.id == newUser.id)) {
+          _users.add(newUser);
+        }
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _userStreamSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadUsers() async {

@@ -15,11 +15,11 @@ class BugCard extends StatefulWidget {
   final BugReport bug;
   final VoidCallback onStatusToggle;
   final VoidCallback onDelete;
-  final Future<void> Function() onSendReminder;
+  final VoidCallback onSendReminder;
   final BugReportService bugReportService;
   final bool highlight;
   final bool isSelected;
-  final Function(bool) onSelectionChanged;
+  final Function(bool)? onSelectionChanged;
   final bool selectionMode;
 
   const BugCard({
@@ -31,7 +31,7 @@ class BugCard extends StatefulWidget {
     required this.bugReportService,
     this.highlight = false,
     this.isSelected = false,
-    required this.onSelectionChanged,
+    this.onSelectionChanged,
     this.selectionMode = false,
   }) : super(key: key);
 
@@ -40,15 +40,14 @@ class BugCard extends StatefulWidget {
 }
 
 class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
+  late AnimationController _highlightController;
+  late Animation<Color?> _highlightAnimation;
   bool _isExpanded = false;
-  bool _commentsLoaded = false;
   List<Comment> _comments = [];
   bool _isLoadingComments = false;
   bool _isLoading = false;
   bool _isAddingComment = false;
   bool _shouldHighlight = false;
-  late AnimationController _highlightController;
-  late Animation<Color?> _highlightAnimation;
 
   String _formatToIST(DateTime utcTime) {
     final istTime = utcTime.add(const Duration(hours: 5, minutes: 30));
@@ -273,68 +272,37 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _shouldHighlight = widget.highlight;
-    // Load comments immediately when card is created
-    _loadComments();
-    
-    // Listen for comment updates
-    widget.bugReportService.commentStream.listen((comment) {
-      if (comment.bugReportId == widget.bug.id) {
-        // Update the local comments list from cache
-        if (mounted) {
-          setState(() {
-            _comments = widget.bugReportService.getCachedComments(widget.bug.id);
-          });
-        }
-      }
-    });
-
     _highlightController = AnimationController(
       duration: const Duration(milliseconds: 3000),
       vsync: this,
     );
-
     _highlightAnimation = ColorTween(
-      begin: Colors.purple[100],
+      begin: Colors.purple.withOpacity(0.2),
       end: Colors.transparent,
     ).animate(CurvedAnimation(
       parent: _highlightController,
       curve: Curves.easeOut,
     ));
+    
+    // Get comments from cache instead of loading individually
+    _loadCachedComments();
+  }
 
-    if (_shouldHighlight) {
-      _highlightController.forward().then((_) {
-        if (mounted) {
-          setState(() {
-            _shouldHighlight = false;
-          });
-        }
-      });
-    }
+  void _loadCachedComments() {
+    if (!mounted) return;
+    setState(() {
+      _comments = widget.bugReportService.getCachedComments(widget.bug.id);
+    });
   }
 
   @override
   void didUpdateWidget(BugCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Reload comments if bug ID changes (e.g., during search)
-    if (oldWidget.bug.id != widget.bug.id) {
-      _loadComments();
-    }
-    
-    // Only highlight if this specific bug is being highlighted
     if (widget.highlight && !oldWidget.highlight) {
-      setState(() {
-        _shouldHighlight = true;
-      });
-      _highlightController.reset();
-      _highlightController.forward().then((_) {
-        if (mounted) {
-          setState(() {
-            _shouldHighlight = false;
-          });
-        }
-      });
+      _highlightController.forward(from: 0);
     }
+    // Refresh cached comments when widget updates
+    _loadCachedComments();
   }
 
   @override
@@ -347,11 +315,6 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
   Widget build(BuildContext context) {
     final screenWidth = MediaQuery.of(context).size.width;
     final cardWidth = screenWidth > 600 ? 400.0 : screenWidth * 0.9;
-
-    // Load comments if not already loaded
-    if (!_commentsLoaded && !_isLoadingComments) {
-      _loadComments();
-    }
 
     final cardGradient = LinearGradient(
       begin: Alignment.topLeft,
@@ -368,297 +331,313 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
 
     return AnimatedBuilder(
       animation: _highlightAnimation,
-      builder: (context, child) {
-        return Container(
-          margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          decoration: BoxDecoration(
-            color: _shouldHighlight ? _highlightAnimation.value : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: child!,
-          ),
-        );
-      },
-      child: StatefulBuilder(
-        builder: (context, setState) => Center(
-          child: GestureDetector(
-            onLongPress: () {
-              widget.onSelectionChanged(!widget.isSelected);
-            },
-            child: Container(
-              width: cardWidth,
-              margin: const EdgeInsets.symmetric(vertical: 4),
-              decoration: BoxDecoration(
-                gradient: cardGradient,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: widget.isSelected ? Colors.blue : Colors.grey[200]!,
-                  width: widget.isSelected ? 2 : 0.5,
+      builder: (context, child) => Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: widget.highlight ? _highlightAnimation.value : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.05),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: child,
+      ),
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        color: Colors.transparent,
+        child: StatefulBuilder(
+          builder: (context, setState) => Center(
+            child: GestureDetector(
+              onLongPress: () {
+                if (widget.onSelectionChanged != null) {
+                  widget.onSelectionChanged?.call(!widget.isSelected);
+                }
+              },
+              child: Container(
+                width: cardWidth,
+                margin: const EdgeInsets.symmetric(vertical: 4),
+                decoration: BoxDecoration(
+                  gradient: cardGradient,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: widget.isSelected ? Colors.blue : Colors.grey[200]!,
+                    width: widget.isSelected ? 2 : 0.5,
+                  ),
                 ),
-              ),
-              child: Stack(
-                children: [
-                  Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: widget.selectionMode
-                          ? () => widget.onSelectionChanged(!widget.isSelected)
-                          : () => _showBugDetails(context),
-                      borderRadius: BorderRadius.circular(20),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // Header with Status and Actions
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                // Status Chips
-                                Row(
-                                  children: [
-                                    _buildStatusChip(
-                                      text: widget.bug.severityText,
-                                      color: widget.bug.severityColor,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    _buildStatusChip(
-                                      text: widget.bug.statusText,
-                                      color: widget.bug.status == BugStatus.resolved
-                                          ? Colors.green
-                                          : Colors.orange,
-                                    ),
-                                  ],
-                                ),
-                                // Actions
-                                if (!widget.selectionMode) // Hide actions in selection mode
+                child: Stack(
+                  children: [
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: widget.selectionMode
+                            ? () {
+                                if (widget.onSelectionChanged != null) {
+                                  widget.onSelectionChanged?.call(!widget.isSelected);
+                                }
+                              }
+                            : () => _showBugDetails(context),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Header with Status and Actions
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  // Status Chips
                                   Row(
                                     children: [
-                                      if (widget.bug.status == BugStatus.assigned)
-                                        IconButton(
-                                          icon: _isLoading 
-                                            ? SizedBox(
-                                                width: 20,
-                                                height: 20,
-                                                child: CircularProgressIndicator(
-                                                  strokeWidth: 2,
-                                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
-                                                ),
-                                              )
-                                            : const Icon(Icons.notifications_none, size: 20),
-                                          onPressed: _isLoading 
-                                            ? null 
-                                            : () async {
-                                                setState(() => _isLoading = true);
-                                                try {
-                                                  await widget.onSendReminder();
-                                                } finally {
-                                                  if (mounted) {
-                                                    setState(() => _isLoading = false);
+                                      _buildStatusChip(
+                                        text: widget.bug.severityText,
+                                        color: widget.bug.severityColor,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _buildStatusChip(
+                                        text: widget.bug.statusText,
+                                        color: widget.bug.status == BugStatus.resolved
+                                            ? Colors.green
+                                            : Colors.orange,
+                                      ),
+                                    ],
+                                  ),
+                                  // Actions
+                                  if (!widget.selectionMode) // Hide actions in selection mode
+                                    Row(
+                                      children: [
+                                        if (widget.bug.status == BugStatus.assigned)
+                                          IconButton(
+                                            icon: _isLoading 
+                                              ? SizedBox(
+                                                  width: 20,
+                                                  height: 20,
+                                                  child: CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                                                  ),
+                                                )
+                                              : const Icon(Icons.notifications_none, size: 20),
+                                            onPressed: _isLoading 
+                                              ? null 
+                                              : () async {
+                                                  setState(() => _isLoading = true);
+                                                  try {
+                                                    widget.onSendReminder();
+                                                  } finally {
+                                                    if (mounted) {
+                                                      setState(() => _isLoading = false);
+                                                    }
                                                   }
-                                                }
-                                              },
-                                          padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints(),
-                                          color: Colors.blue,
-                                        ),
-                                      PopupMenuButton<String>(
-                                        itemBuilder: (context) => [
-                                          // Add resolve/unresolve option
-                                          PopupMenuItem(
-                                            value: 'toggle_status',
-                                            child: ListTile(
-                                              leading: Icon(
-                                                widget.bug.status == BugStatus.resolved
-                                                    ? Icons.refresh
-                                                    : Icons.check_circle_outline,
-                                                color: widget.bug.status == BugStatus.resolved
-                                                    ? Colors.orange
-                                                    : Colors.green,
-                                              ),
-                                              title: Text(
-                                                widget.bug.status == BugStatus.resolved
-                                                    ? 'Mark as Pending'
-                                                    : 'Mark as Resolved',
-                                              ),
-                                            ),
+                                                },
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                            color: Colors.blue,
                                           ),
-                                          // Delete option (for both assigned and resolved bugs)
-                                          PopupMenuItem(
-                                            value: 'delete',
-                                            child: ListTile(
-                                              leading: Icon(Icons.delete, color: Colors.red),
-                                              title: Text('Delete'),
-                                            ),
-                                          ),
-                                        ],
-                                        onSelected: (value) {
-                                          if (value == 'delete') {
-                                            // Show confirmation dialog
-                                            showDialog(
-                                              context: context,
-                                              builder: (context) => AlertDialog(
-                                                title: Text('Delete Bug Report'),
-                                                content: Text(
+                                        PopupMenuButton<String>(
+                                          itemBuilder: (context) => [
+                                            // Add resolve/unresolve option
+                                            PopupMenuItem(
+                                              value: 'toggle_status',
+                                              child: ListTile(
+                                                leading: Icon(
                                                   widget.bug.status == BugStatus.resolved
-                                                      ? 'Are you sure you want to delete this resolved bug report?'
-                                                      : 'Are you sure you want to delete this bug report?'
+                                                      ? Icons.refresh
+                                                      : Icons.check_circle_outline,
+                                                  color: widget.bug.status == BugStatus.resolved
+                                                      ? Colors.orange
+                                                      : Colors.green,
                                                 ),
-                                                actions: [
-                                                  TextButton(
-                                                    onPressed: () => Navigator.pop(context),
-                                                    child: Text('Cancel'),
-                                                  ),
-                                                  TextButton(
-                                                    onPressed: () {
-                                                      Navigator.pop(context);
-                                                      widget.onDelete();
-                                                    },
-                                                    child: Text('Delete', style: TextStyle(color: Colors.red)),
-                                                  ),
-                                                ],
+                                                title: Text(
+                                                  widget.bug.status == BugStatus.resolved
+                                                      ? 'Mark as Pending'
+                                                      : 'Mark as Resolved',
+                                                ),
                                               ),
-                                            );
-                                          } else if (value == 'toggle_status') {
-                                            widget.onStatusToggle();
-                                          }
-                                        },
-                                        icon: Icon(
-                                          Icons.more_vert,
-                                          color: Colors.grey[600],
-                                          size: 20,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 12),
-
-                            // Description
-                            Text(
-                              widget.bug.description,
-                              style: GoogleFonts.poppins(
-                                fontSize: 13,
-                                color: Colors.black87,
-                                height: 1.3,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 12),
-
-                            // Image if available
-                            if (widget.bug.imageUrl != null)
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(12),
-                                child: Image.network(
-                                  widget.bug.imageUrl!,
-                                  height: 120,
-                                  width: double.infinity,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (_, __, ___) => Container(),
-                                ),
-                              ),
-
-                            const SizedBox(height: 12),
-
-                            // Footer
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      if (widget.bug.projectName != null)
-                                        Text(
-                                          widget.bug.projectName!,
-                                          style: GoogleFonts.poppins(
-                                            color: Colors.grey[700],
-                                            fontSize: 11,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      Text(
-                                        'Assigned to: ${widget.bug.recipient}',
-                                        style: GoogleFonts.poppins(
-                                          color: Colors.grey[600],
-                                          fontSize: 11,
-                                        ),
-                                      ),
-                                      if (widget.bug.ccRecipients.isNotEmpty) ...[
-                                        Text(
-                                          'CC: ${widget.bug.ccRecipients.join(", ")}',
-                                          style: GoogleFonts.poppins(
+                                            ),
+                                            // Delete option (for both assigned and resolved bugs)
+                                            PopupMenuItem(
+                                              value: 'delete',
+                                              child: ListTile(
+                                                leading: Icon(Icons.delete, color: Colors.red),
+                                                title: Text('Delete'),
+                                              ),
+                                            ),
+                                          ],
+                                          onSelected: (value) {
+                                            if (value == 'delete') {
+                                              // Show confirmation dialog
+                                              showDialog(
+                                                context: context,
+                                                builder: (context) => AlertDialog(
+                                                  title: Text('Delete Bug Report'),
+                                                  content: Text(
+                                                    widget.bug.status == BugStatus.resolved
+                                                        ? 'Are you sure you want to delete this resolved bug report?'
+                                                        : 'Are you sure you want to delete this bug report?'
+                                                  ),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () => Navigator.pop(context),
+                                                      child: Text('Cancel'),
+                                                    ),
+                                                    TextButton(
+                                                      onPressed: () {
+                                                        Navigator.pop(context);
+                                                        widget.onDelete();
+                                                      },
+                                                      child: Text('Delete', style: TextStyle(color: Colors.red)),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                            } else if (value == 'toggle_status') {
+                                              widget.onStatusToggle();
+                                            }
+                                          },
+                                          icon: Icon(
+                                            Icons.more_vert,
                                             color: Colors.grey[600],
-                                            fontSize: 11,
+                                            size: 20,
                                           ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
                                         ),
-                                        // Debug print
-                                        Builder(builder: (context) {
-                                          print('CC Recipients: ${widget.bug.ccRecipients}');
-                                          return const SizedBox.shrink();
-                                        }),
                                       ],
-                                      if (widget.bug.tabUrl != null && widget.bug.tabUrl!.isNotEmpty)
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+
+                              // Description
+                              Text(
+                                widget.bug.description,
+                                style: GoogleFonts.poppins(
+                                  fontSize: 13,
+                                  color: Colors.black87,
+                                  height: 1.3,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 12),
+
+                              // Image if available
+                              if (widget.bug.imageUrl != null)
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.network(
+                                    widget.bug.imageUrl!,
+                                    height: 120,
+                                    width: double.infinity,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => Container(),
+                                  ),
+                                ),
+
+                              const SizedBox(height: 12),
+
+                              // Footer
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (widget.bug.projectName != null)
+                                          Text(
+                                            widget.bug.projectName!,
+                                            style: GoogleFonts.poppins(
+                                              color: Colors.grey[700],
+                                              fontSize: 11,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
                                         Text(
-                                          'URL: ${widget.bug.tabUrl}',
+                                          'Assigned to: ${widget.bug.recipient}',
                                           style: GoogleFonts.poppins(
                                             color: Colors.grey[600],
                                             fontSize: 11,
                                           ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
                                         ),
-                                    ],
+                                        if (widget.bug.ccRecipients.isNotEmpty) ...[
+                                          Text(
+                                            'CC: ${widget.bug.ccRecipients.join(", ")}',
+                                            style: GoogleFonts.poppins(
+                                              color: Colors.grey[600],
+                                              fontSize: 11,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                          // Debug print
+                                          Builder(builder: (context) {
+                                            print('CC Recipients: ${widget.bug.ccRecipients}');
+                                            return const SizedBox.shrink();
+                                          }),
+                                        ],
+                                        if (widget.bug.tabUrl != null && widget.bug.tabUrl!.isNotEmpty)
+                                          Text(
+                                            'URL: ${widget.bug.tabUrl}',
+                                            style: GoogleFonts.poppins(
+                                              color: Colors.grey[600],
+                                              fontSize: 11,
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                Text(
-                                  _getFormattedTime(),
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.grey[500],
-                                    fontSize: 11,
+                                  Text(
+                                    _getFormattedTime(),
+                                    style: GoogleFonts.poppins(
+                                      color: Colors.grey[500],
+                                      fontSize: 11,
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
 
-                            // Add comments section at the end
-                            if (_comments.isNotEmpty) _buildCommentsSection(),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (widget.isSelected)
-                    Positioned(
-                      top: 8,
-                      right: 8,
-                      child: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
-                          color: Colors.blue,
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: Colors.white,
-                            width: 2,
+                              // Add comments section at the end
+                              if (_comments.isNotEmpty) _buildCommentsSection(),
+                            ],
                           ),
                         ),
-                        child: const Icon(
-                          Icons.check,
-                          color: Colors.white,
-                          size: 16,
-                        ),
                       ),
                     ),
-                ],
+                    if (widget.isSelected)
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: Colors.blue,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white,
+                              width: 2,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.check,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
@@ -700,33 +679,5 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
         ),
       ),
     );
-  }
-
-  Future<void> _loadComments() async {
-    if (!mounted) return;
-    
-    setState(() {
-      _isLoadingComments = true;
-    });
-
-    try {
-      final comments = await widget.bugReportService.getComments(widget.bug.id);
-      if (mounted) {
-        setState(() {
-          _comments = comments;
-          _commentsLoaded = true;
-          _isLoadingComments = false;
-        });
-        print('Loaded ${comments.length} comments for bug ${widget.bug.id}');
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isLoadingComments = false;
-          _commentsLoaded = true;
-        });
-        print('Error loading comments: $e');
-      }
-    }
   }
 } 

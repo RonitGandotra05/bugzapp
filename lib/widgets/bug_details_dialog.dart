@@ -81,27 +81,37 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
     }
   }
 
-  Future<void> _addComment() async {
-    final comment = _commentController.text.trim();
-    if (comment.isEmpty) return;
+  Future<void> _submitComment() async {
+    if (_commentController.text.trim().isEmpty) return;
 
-    setState(() => _isSubmittingComment = true);
+    setState(() {
+      _isSubmittingComment = true;
+    });
+
     try {
-      await widget.bugReportService.addComment(
+      final comment = await widget.bugReportService.addComment(
         widget.bug.id,
-        comment,
+        _commentController.text.trim(),
       );
-      _commentController.clear();
-      await _loadComments();
+
+      if (mounted) {
+        setState(() {
+          _comments.add(comment);
+          _commentController.clear();
+          _isSubmittingComment = false;
+        });
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error adding comment: $e')),
+          SnackBar(
+            content: Text('Error adding comment: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmittingComment = false);
+        setState(() {
+          _isSubmittingComment = false;
+        });
       }
     }
   }
@@ -365,7 +375,7 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: _isSubmittingComment ? null : _addComment,
+                onTap: _isSubmittingComment ? null : _submitComment,
                 customBorder: const CircleBorder(),
                 child: Padding(
                   padding: const EdgeInsets.all(10.0),

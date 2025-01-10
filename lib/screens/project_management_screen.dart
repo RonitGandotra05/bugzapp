@@ -8,6 +8,7 @@ import '../models/bug_report.dart';
 import '../widgets/bug_card.dart';
 import '../widgets/sort_dropdown.dart';
 import '../widgets/bug_details_dialog.dart';
+import 'dart:async';
 
 class ProjectManagementScreen extends StatefulWidget {
   const ProjectManagementScreen({Key? key}) : super(key: key);
@@ -29,10 +30,12 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
+  StreamSubscription<Project>? _projectStreamSubscription;
 
   @override
   void dispose() {
     _pageController.dispose();
+    _projectStreamSubscription?.cancel();
     super.dispose();
   }
 
@@ -41,6 +44,15 @@ class _ProjectManagementScreenState extends State<ProjectManagementScreen> {
     super.initState();
     _loadProjects();
     _checkAdminStatus();
+    // Subscribe to project stream for real-time updates
+    _projectStreamSubscription = _bugReportService.projectStream.listen((newProject) {
+      setState(() {
+        // Add the new project to the list if not already present
+        if (!_projects.any((project) => project.id == newProject.id)) {
+          _projects.add(newProject);
+        }
+      });
+    });
   }
 
   Future<void> _checkAdminStatus() async {
