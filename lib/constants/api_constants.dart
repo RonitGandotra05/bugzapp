@@ -1,5 +1,6 @@
 class ApiConstants {
-  static const String baseUrl = 'https://bugapi.tripxap.com';
+  static String get baseUrl => 'https://bugapi.tripxap.com';
+  static String get wsUrl => baseUrl.replaceFirst('https://', 'wss://');
   static const String loginEndpoint = '/login';
   static const String usersEndpoint = '/users';
   static const String bugReportsEndpoint = '/bug_reports';

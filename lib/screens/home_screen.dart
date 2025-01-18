@@ -28,6 +28,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../widgets/notification_bell.dart';
 import '../services/notification_service.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 
 enum BugFilter {
   all,
@@ -138,7 +140,7 @@ class BugFilterManager {
     .length;
 }
 
-class HomeScreenState extends State<HomeScreen> {
+class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   final _bugReportService = BugReportService();
   final _searchController = TextEditingController();
   final _scaffoldKey = GlobalKey<ScaffoldState>();
@@ -146,6 +148,7 @@ class HomeScreenState extends State<HomeScreen> {
   final _scrollController = ScrollController();
   final _listViewKey = GlobalKey();
   
+  String? _mediaType;
   User? _currentUser;
   List<User> _users = [];
   List<Project> _projects = [];
@@ -160,6 +163,8 @@ class HomeScreenState extends State<HomeScreen> {
   // Add missing variables for bug report form
   String? _description;
   User? _selectedRecipient;
+  String? _selectedRecipientId;
+  String? _selectedProjectId;
   File? _imageFile;
   Uint8List? _webImageBytes;
   String _selectedSeverity = 'low';
@@ -190,9 +195,15 @@ class HomeScreenState extends State<HomeScreen> {
 
   final Map<int, GlobalKey> _bugCardKeys = {};
 
+  // Add these variables for camera functionality
+  bool _isCameraInitialized = false;
+  String? _lastImagePath;
+  bool _isProcessingImage = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _filterManager = BugFilterManager(
       allBugs: [],
       userFilter: _currentBugFilter,
@@ -201,6 +212,10 @@ class HomeScreenState extends State<HomeScreen> {
       bugReportService: _bugReportService,
       selectedProjectIds: _selectedProjectIds,
     );
+    
+    // Set refresh callback in BugReportService
+    _bugReportService.setRefreshCallback(_refreshEverything);
+    
     _loadData();
     _setupRealTimeUpdates();
     
@@ -212,55 +227,69 @@ class HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _lastImagePath != null) {
+      _processLastImage();
+    }
+  }
+
+  Future<void> _processLastImage() async {
+    if (_lastImagePath != null && !_isProcessingImage) {
+      setState(() {
+        _isProcessingImage = true;
+      });
+
+      try {
+        final file = File(_lastImagePath!);
+        if (await file.exists()) {
+          setState(() {
+            _imageFile = file;
+            _selectedFile = file;
+            _cachedImageFile = file;
+            _webImageBytes = null;
+            _cachedWebImageBytes = null;
+          });
+        }
+      } catch (e) {
+        print('Error processing last image: $e');
+      } finally {
+        setState(() {
+          _isProcessingImage = false;
+          _lastImagePath = null;
+        });
+      }
+    }
+  }
+
   void _setupRealTimeUpdates() {
     // Listen for bug report updates
     _bugReportService.bugReportStream.listen(
       (bugReport) {
-        if (mounted) {
-          setState(() {
-            final index = _bugReports.indexWhere((b) => b.id == bugReport.id);
-            if (index != -1) {
-              // Update existing bug report
-              _bugReports[index] = bugReport;
-              print('Updated existing bug report #${bugReport.id}');
-            } else {
-              // Add new bug report
-              _bugReports.insert(0, bugReport);
-              print('Added new bug report #${bugReport.id}');
-              
-              // Only show notification for new bug reports and if not created by current user
-              if (_currentUser?.id != bugReport.creatorId) {
-                NotificationService().showBugNotification(
-                  title: 'New Bug Report #${bugReport.id}',
-                  body: '${bugReport.creator ?? "Someone"} reported: ${bugReport.description}',
-                  bugId: bugReport.id.toString(),
-                  creatorName: bugReport.creator,
-                  isInApp: true,
-                );
-              }
-            }
-            
-            // Sort the list to maintain order
-            _bugReports.sort((a, b) => 
-              _isAscendingOrder ? a.id.compareTo(b.id) : b.id.compareTo(a.id)
-            );
-            
-            // Update filter manager
-            _updateFilterManager();
-          });
-        }
+        // Refresh everything when a bug report is received
+        _refreshEverything();
       },
       onError: (error) {
         print('Error in bug report stream: $error');
       },
     );
 
-    // Refresh bug reports periodically to ensure sync
-    Timer.periodic(const Duration(minutes: 1), (_) {
-      if (mounted) {
-        _refreshBugReports();
-      }
-    });
+    // Listen for comment updates
+    _bugReportService.commentStream.listen(
+      (comment) {
+        // Refresh everything when a comment is received
+        _refreshEverything();
+      },
+      onError: (error) {
+        print('Error in comment stream: $error');
+      },
+    );
   }
 
   void _updateFilterManager() {
@@ -432,7 +461,7 @@ class HomeScreenState extends State<HomeScreen> {
       return;
     }
 
-    if (_selectedRecipient == null) {
+    if (_selectedRecipientId == null) {
       setState(() => _error = 'Please select a recipient');
       return;
     }
@@ -455,13 +484,13 @@ class HomeScreenState extends State<HomeScreen> {
       
       await _bugReportService.uploadBugReport(
         description: _description!,
-        recipientId: _selectedRecipient!.id.toString(),
+        recipientName: _users.firstWhere((u) => u.id.toString() == _selectedRecipientId).name,
         imageFile: imageFileToUpload,
         imageBytes: imageBytesToUpload,
-        severity: _selectedSeverity.toLowerCase(),
-        projectId: _selectedProject?.id.toString(),
-        tabUrl: _tabUrl,
-        ccRecipients: _selectedCCRecipients,
+        severity: _selectedSeverity,
+        projectId: _selectedProjectId,
+        tabUrl: _tabUrl ?? '',
+        ccRecipients: _selectedCCRecipients.where((r) => r.isNotEmpty).toList(),
       );
 
       if (mounted) {
@@ -496,7 +525,6 @@ class HomeScreenState extends State<HomeScreen> {
       // Check camera permission
       final status = await Permission.camera.status;
       if (status.isDenied || status.isRestricted) {
-        // Request permission directly without showing dialog first
         final result = await Permission.camera.request();
         
         if (result.isDenied || result.isPermanentlyDenied) {
@@ -521,24 +549,13 @@ class HomeScreenState extends State<HomeScreen> {
           }
           return;
         }
-      } else if (status.isPermanentlyDenied) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: const Text('Camera permission is required. Please enable it in app settings.'),
-              backgroundColor: Colors.red,
-              action: SnackBarAction(
-                label: 'Settings',
-                onPressed: () => openAppSettings(),
-                textColor: Colors.white,
-              ),
-            ),
-          );
-        }
-        return;
       }
 
-      // Now that we have permission, take the picture
+      setState(() {
+        _isLoading = true;
+        _isCameraInitialized = false;
+      });
+
       final ImagePicker picker = ImagePicker();
       final XFile? photo = await picker.pickImage(
         source: ImageSource.camera,
@@ -547,35 +564,29 @@ class HomeScreenState extends State<HomeScreen> {
         maxHeight: 1080,
         preferredCameraDevice: CameraDevice.rear,
       );
-      
+
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+
       if (photo != null) {
-        // Process image in a separate isolate if possible
-        try {
-          final file = File(photo.path);
-          if (mounted) {
-            setState(() {
-              _imageFile = file;
-              _selectedFile = file;
-              _cachedImageFile = file;
-              _webImageBytes = null;
-              _cachedWebImageBytes = null;
-            });
-          }
-        } catch (e) {
-          print('Error processing image: $e');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Error processing photo: $e'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
+        // Save the image path for processing after app resume
+        _lastImagePath = photo.path;
+        
+        // Try to process the image immediately
+        if (mounted) {
+          await _processLastImage();
         }
       }
     } catch (e) {
       print('Error taking picture: $e');
       if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isCameraInitialized = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error capturing photo: $e'),
@@ -589,17 +600,51 @@ class HomeScreenState extends State<HomeScreen> {
   Future<void> _pickImage(ImageSource source) async {
     try {
       final ImagePicker picker = ImagePicker();
-      final XFile? photo = await picker.pickImage(
-        source: source,
-        imageQuality: 85,
-        maxWidth: 1920,
-        maxHeight: 1080,
-      );
       
-      if (photo != null && mounted) {
+      // Show dialog to choose between image and video
+      final mediaType = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Select Media Type', style: GoogleFonts.poppins()),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.image, color: Colors.blue),
+                title: Text('Image', style: GoogleFonts.poppins()),
+                onTap: () => Navigator.pop(context, 'image'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.video_camera_back, color: Colors.red),
+                title: Text('Video', style: GoogleFonts.poppins()),
+                onTap: () => Navigator.pop(context, 'video'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (mediaType == null) return;
+
+      XFile? mediaFile;
+      if (mediaType == 'video') {
+        mediaFile = await picker.pickVideo(
+          source: source,
+          maxDuration: const Duration(minutes: 5), // 5 minutes max
+        );
+      } else {
+        mediaFile = await picker.pickImage(
+          source: source,
+          imageQuality: 85,
+          maxWidth: 1920,
+          maxHeight: 1080,
+        );
+      }
+      
+      if (mediaFile != null && mounted) {
         try {
           if (kIsWeb) {
-            final bytes = await photo.readAsBytes();
+            final bytes = await mediaFile.readAsBytes();
             if (mounted) {
               setState(() {
                 _webImageBytes = bytes;
@@ -607,10 +652,11 @@ class HomeScreenState extends State<HomeScreen> {
                 _imageFile = null;
                 _selectedFile = null;
                 _cachedImageFile = null;
+                _mediaType = mediaType;
               });
             }
           } else {
-            final file = File(photo.path);
+            final file = File(mediaFile.path);
             if (mounted) {
               setState(() {
                 _imageFile = file;
@@ -618,15 +664,16 @@ class HomeScreenState extends State<HomeScreen> {
                 _cachedImageFile = file;
                 _webImageBytes = null;
                 _cachedWebImageBytes = null;
+                _mediaType = mediaType;
               });
             }
           }
         } catch (e) {
-          print('Error processing selected image: $e');
+          print('Error processing selected media: $e');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Error processing selected image: $e'),
+                content: Text('Error processing selected media: $e'),
                 backgroundColor: Colors.red,
               ),
             );
@@ -634,11 +681,11 @@ class HomeScreenState extends State<HomeScreen> {
         }
       }
     } catch (e) {
-      print('Error picking image: $e');
+      print('Error picking media: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error selecting image: $e'),
+            content: Text('Error selecting media: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -2173,13 +2220,13 @@ class HomeScreenState extends State<HomeScreen> {
                                     try {
                                       await _bugReportService.uploadBugReport(
                                         description: _description!,
-                                        recipientId: _selectedRecipientId!,
-                                        ccRecipients: _selectedCCRecipients.where((r) => r.isNotEmpty).toList(),
+                                        recipientName: _users.firstWhere((u) => u.id.toString() == _selectedRecipientId).name,
                                         imageFile: _imageFile ?? _cachedImageFile,
                                         imageBytes: _webImageBytes ?? _cachedWebImageBytes,
                                         severity: _selectedSeverity,
                                         projectId: _selectedProjectId,
                                         tabUrl: _tabUrl ?? '',
+                                        ccRecipients: _selectedCCRecipients.where((r) => r.isNotEmpty).toList(),
                                       );
                                       
                                       if (mounted) {

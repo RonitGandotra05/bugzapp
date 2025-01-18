@@ -87,12 +87,13 @@ class _NotificationBellState extends State<NotificationBell> {
   int _unreadCount = 0;
   bool _isInitialized = false;
   final String _notificationsKey = 'notifications_list';
+  static const int maxNotifications = 50; // Limit number of notifications
+  final Set<String> _processedNotifications = {};
 
   @override
   void initState() {
     super.initState();
     _initializeNotifications();
-    _loadSavedNotifications();
     _setupStreams();
   }
 
@@ -103,45 +104,25 @@ class _NotificationBellState extends State<NotificationBell> {
     }
   }
 
-  Future<void> _loadSavedNotifications() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedNotifications = prefs.getString(_notificationsKey);
-      if (savedNotifications != null) {
-        final List<dynamic> notificationsList = jsonDecode(savedNotifications);
-        setState(() {
-          _notifications.clear();
-          _notifications.addAll(
-            notificationsList.map((item) => NotificationItem.fromJson(item)).toList()
-          );
-          _notifications.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-        });
-      }
-    } catch (e) {
-      print('Error loading saved notifications: $e');
-    }
-  }
-
-  Future<void> _saveNotifications() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final notificationsJson = jsonEncode(
-        _notifications.map((item) => item.toJson()).toList()
-      );
-      await prefs.setString(_notificationsKey, notificationsJson);
-    } catch (e) {
-      print('Error saving notifications: $e');
-    }
-  }
-
   void _setupStreams() {
     widget.bugReportStream.listen((bugReport) {
+      // Only show notification for newly created bug reports
       final notificationId = 'bug_${bugReport.id}';
+      
+      // Skip if already processed
+      if (_processedNotifications.contains(notificationId)) {
+        print('[NotificationBell] Skipping duplicate bug report notification: $notificationId');
+        return;
+      }
+      
+      _processedNotifications.add(notificationId);
+      print('[NotificationBell] Processing new bug report notification: $notificationId');
+      
       _addNotification(
         NotificationItem(
           id: bugReport.id,
-          title: 'New Bug Report #${bugReport.id}',
-          message: bugReport.description,
+          title: 'New Bug Report',
+          message: 'Bug #${bugReport.id}: ${bugReport.description}',
           timestamp: bugReport.modifiedDate,
           type: NotificationType.bugReport,
           creatorName: bugReport.creator,
@@ -150,58 +131,62 @@ class _NotificationBellState extends State<NotificationBell> {
           uniqueId: notificationId,
         ),
       );
-
-      _notificationService.showNotification(
-        title: 'New Bug Report #${bugReport.id}',
-        body: '${bugReport.creator ?? "Someone"} reported: ${bugReport.description}',
-        payload: {'type': 'bug', 'id': notificationId},
-        isInApp: true,
-      );
     });
 
     widget.commentStream.listen((comment) {
       final notificationId = 'comment_${comment.bugReportId}_${comment.id}';
+      
+      // Skip if already processed
+      if (_processedNotifications.contains(notificationId)) {
+        print('[NotificationBell] Skipping duplicate comment notification: $notificationId');
+        return;
+      }
+      
+      _processedNotifications.add(notificationId);
+      print('[NotificationBell] Processing new comment notification: $notificationId');
+      
       _addNotification(
         NotificationItem(
           id: comment.bugReportId,
-          title: 'New Comment on Bug #${comment.bugReportId}',
-          message: comment.comment,
+          title: 'New Comment',
+          message: '${comment.userName}: ${comment.comment}',
           timestamp: comment.createdAt,
           type: NotificationType.comment,
           creatorName: comment.userName,
           uniqueId: notificationId,
         ),
       );
-
-      _notificationService.showNotification(
-        title: 'New Comment on Bug #${comment.bugReportId}',
-        body: '${comment.userName}: ${comment.comment}',
-        payload: {'type': 'comment', 'id': notificationId},
-        isInApp: true,
-      );
     });
   }
 
   void _addNotification(NotificationItem notification) {
-    final existingIndex = _notifications.indexWhere((n) => n.uniqueId == notification.uniqueId);
-    
     setState(() {
+      // Check if notification with same uniqueId already exists
+      final existingIndex = _notifications.indexWhere((n) => n.uniqueId == notification.uniqueId);
       if (existingIndex != -1) {
-        _notifications[existingIndex] = notification;
-      } else {
-        _notifications.insert(0, notification);
+        print('[NotificationBell] Notification already exists: ${notification.uniqueId}');
+        return;
       }
       
-      _notifications.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      // Add new notification at the beginning
+      _notifications.insert(0, notification);
+      print('[NotificationBell] Added new notification: ${notification.uniqueId}');
+      
+      // Keep only the latest maxNotifications
+      if (_notifications.length > maxNotifications) {
+        _notifications.removeRange(maxNotifications, _notifications.length);
+      }
+      
+      // Increment unread count
+      _unreadCount++;
     });
-    
-    _saveNotifications();
   }
 
   void _clearNotifications() {
     setState(() {
       _notifications.clear();
       _unreadCount = 0;
+      _processedNotifications.clear();
     });
     _notificationService.clearAllNotifications();
   }

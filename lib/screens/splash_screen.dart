@@ -27,8 +27,14 @@ class _SplashScreenState extends State<SplashScreen> {
     final isLoggedIn = await TokenStorage.isLoggedIn();
     
     if (isLoggedIn) {
-      // Load all comments before navigating to home screen
+      print('[Splash] User is logged in, initializing services...');
+      // Initialize services before navigating to home screen
       final bugReportService = BugReportService();
+      
+      print('[Splash] Initializing WebSocket connection...');
+      await bugReportService.initializeWebSocket();
+      
+      print('[Splash] Loading initial data...');
       await bugReportService.loadAllComments();
     }
     

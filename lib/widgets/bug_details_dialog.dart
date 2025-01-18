@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:timeago/timeago.dart' as timeago;
 import 'dart:async';
 import 'dart:typed_data';
 import '../models/bug_report.dart';
@@ -9,6 +8,7 @@ import '../models/comment.dart';
 import '../services/bug_report_service.dart';
 import '../services/image_proxy_service.dart';
 import '../widgets/image_preview.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class BugDetailsDialog extends StatefulWidget {
   final BugReport bug;
@@ -89,14 +89,13 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
     });
 
     try {
-      final comment = await widget.bugReportService.addComment(
+      await widget.bugReportService.addComment(
         widget.bug.id,
         _commentController.text.trim(),
       );
 
       if (mounted) {
         setState(() {
-          _comments.add(comment);
           _commentController.clear();
           _isSubmittingComment = false;
         });
@@ -176,28 +175,61 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: _imageBytes != null
-              ? Image.memory(
-                  _imageBytes!,
-                  fit: BoxFit.contain,
-                )
-              : widget.imageUrl != null
-                  ? Image.network(
-                      widget.imageUrl!,
-                      fit: BoxFit.contain,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Center(
-                          child: CircularProgressIndicator(
-                            value: loadingProgress.expectedTotalBytes != null
-                                ? loadingProgress.cumulativeBytesLoaded /
-                                    loadingProgress.expectedTotalBytes!
-                                : null,
-                          ),
-                        );
+          child: widget.mediaType == 'video'
+            ? Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    color: Colors.black87,
+                    child: const Icon(
+                      Icons.play_circle_outline,
+                      color: Colors.white,
+                      size: 64,
+                    ),
+                  ),
+                  Positioned(
+                    bottom: 16,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final url = Uri.parse(widget.imageUrl ?? '');
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url, mode: LaunchMode.externalApplication);
+                        }
                       },
-                    )
-                  : const Center(child: Text('No image available')),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Play Video'),
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 24,
+                          vertical: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : _imageBytes != null
+                ? Image.memory(
+                    _imageBytes!,
+                    fit: BoxFit.contain,
+                  )
+                : widget.imageUrl != null
+                    ? Image.network(
+                        widget.imageUrl!,
+                        fit: BoxFit.contain,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          return Center(
+                            child: CircularProgressIndicator(
+                              value: loadingProgress.expectedTotalBytes != null
+                                  ? loadingProgress.cumulativeBytesLoaded /
+                                      loadingProgress.expectedTotalBytes!
+                                  : null,
+                            ),
+                          );
+                        },
+                      )
+                    : const Center(child: Text('No media available')),
         ),
       ),
     );
@@ -302,7 +334,7 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
                               ],
                             ),
                             Text(
-                              timeago.format(comment.createdAt),
+                              _formatTime(comment.createdAt),
                               style: GoogleFonts.poppins(
                                 fontSize: 12,
                                 color: Colors.grey[600],
@@ -474,7 +506,8 @@ class _BugDetailsDialogState extends State<BugDetailsDialog> {
 
   String _formatTime(DateTime time) {
     // Format as IST date and time
-    return '${time.day.toString().padLeft(2, '0')}/${time.month.toString().padLeft(2, '0')}/${time.year} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    final istTime = time.add(const Duration(hours: 5, minutes: 30));
+    return DateFormat("dd MMM yyyy, hh:mm a").format(istTime) + " IST";
   }
 
   String _getFormattedTime(DateTime time) {

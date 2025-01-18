@@ -49,11 +49,11 @@ class BugReport {
   });
 
   factory BugReport.fromJson(Map<String, dynamic> json) {
-    // Parse the modified_date string to DateTime in IST
+    // Parse the modified_date string to DateTime in UTC
     DateTime? modifiedDate;
     if (json['modified_date'] != null) {
-      // Parse UTC time and convert to IST by adding 5 hours and 30 minutes
-      modifiedDate = DateTime.parse(json['modified_date']).add(Duration(hours: 5, minutes: 30));
+      // Parse UTC time without converting to IST
+      modifiedDate = DateTime.parse(json['modified_date']);
     }
 
     // Handle creator data
@@ -68,8 +68,13 @@ class BugReport {
     Map<String, dynamic>? projectData = json['project'] is Map ? json['project'] as Map<String, dynamic> : null;
     String? projectName = projectData?['name'] ?? json['project_name']?.toString();
 
-    // Parse CC recipients without debug prints
-    final ccRecipients = (json['cc_recipients'] as List<dynamic>?)?.cast<String>() ?? [];
+    // Parse CC recipients
+    final ccRecipients = (json['cc_recipients'] as List<dynamic>?)?.map((recipient) {
+      if (recipient is Map<String, dynamic>) {
+        return recipient['name'] as String;
+      }
+      return recipient as String;
+    }).toList() ?? [];
 
     return BugReport(
       id: json['id'] as int,
@@ -80,7 +85,7 @@ class BugReport {
       creator: creator,
       recipient: recipient,
       mediaType: json['media_type'] as String?,
-      modifiedDate: modifiedDate ?? DateTime.now().add(Duration(hours: 5, minutes: 30)),
+      modifiedDate: modifiedDate ?? DateTime.now(),  // Store as UTC
       projectName: projectName,
       tabUrl: json['tab_url'] as String?,
       ccRecipients: ccRecipients,
@@ -141,4 +146,25 @@ class BugReport {
   }
 
   bool get hasComments => commentCount > 0;
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'description': description,
+      'image_url': imageUrl,
+      'status': status.toString().split('.').last,
+      'severity': severity.toString().split('.').last,
+      'creator': creator,
+      'recipient': recipient,
+      'media_type': mediaType,
+      'modified_date': modifiedDate.toUtc().toIso8601String(),
+      'project_name': projectName,
+      'tab_url': tabUrl,
+      'cc_recipients': ccRecipients,
+      'creator_id': creatorId,
+      'recipient_id': recipientId,
+      'project_id': projectId,
+      'comment_count': commentCount,
+    };
+  }
 } 

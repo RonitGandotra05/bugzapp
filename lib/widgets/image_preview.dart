@@ -10,182 +10,164 @@ class ImagePreview extends StatelessWidget {
   final String? mediaType;
   final String? tabUrl;
   final String description;
+  final VoidCallback? onClose;
 
   const ImagePreview({
     Key? key,
-    required this.imageUrl,
-    required this.mediaType,
-    required this.tabUrl,
-    required this.description,
+    this.imageUrl,
+    this.mediaType,
+    this.tabUrl,
+    this.description = '',
+    this.onClose,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        elevation: 0,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: Text(
-          mediaType?.toUpperCase() ?? '',
-          style: GoogleFonts.poppins(
-            color: Colors.white,
-            fontSize: 16,
-          ),
-        ),
-        actions: [
-          if (tabUrl != null && tabUrl!.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.open_in_browser),
-              tooltip: 'Open page in browser',
-              onPressed: () async {
-                final url = Uri.parse(tabUrl!);
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                }
-              },
-            ),
-          IconButton(
-            icon: const Icon(Icons.open_in_new),
-            tooltip: 'Open media in browser',
-            onPressed: () async {
-              final url = Uri.parse(imageUrl ?? '');
-              if (await canLaunchUrl(url)) {
-                await launchUrl(url, mode: LaunchMode.externalApplication);
-              }
-            },
-          ),
-        ],
-      ),
-      body: Column(
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: mediaType == 'video'
-                ? _buildVideoPreview()
-                : FutureBuilder<Uint8List?>(
-                    future: ImageProxyService.getImageBytes(imageUrl ?? ''),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                          ),
-                        );
-                      }
-
-                      if (snapshot.hasError || !snapshot.hasData) {
-                        print('Error loading image in preview: ${snapshot.error}');
-                        print('Preview Image URL: ${imageUrl ?? ''}');
-                        return Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(
-                                Icons.error_outline,
-                                color: Colors.white54,
-                                size: 48,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'Failed to load image',
-                                style: GoogleFonts.poppins(
-                                  color: Colors.white54,
-                                ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.all(16.0),
-                                child: SelectableText(
-                                  imageUrl ?? '',
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white24,
-                                    fontSize: 10,
-                                  ),
-                                  textAlign: TextAlign.center,
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      }
-
-                      return PhotoView(
-                        imageProvider: MemoryImage(snapshot.data!),
-                        minScale: PhotoViewComputedScale.contained,
-                        maxScale: PhotoViewComputedScale.covered * 2,
-                        backgroundDecoration: const BoxDecoration(
-                          color: Colors.black,
-                        ),
-                        errorBuilder: (context, error, stackTrace) {
-                          return Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.broken_image, size: 64, color: Colors.grey[400]),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'Failed to load image',
-                                  style: GoogleFonts.poppins(color: Colors.grey[600]),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      );
-                    },
-                  ),
+          Row(
+            children: [
+              Icon(
+                mediaType == 'video' ? Icons.videocam : Icons.image,
+                size: 16,
+                color: Colors.green[700],
+              ),
+              const SizedBox(width: 8),
+              Text(
+                mediaType == 'video' ? 'Video Preview' : 'Image Preview',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  color: Colors.green[700],
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const Spacer(),
+              if (onClose != null)
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: onClose,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                  iconSize: 20,
+                  color: Colors.grey[600],
+                ),
+            ],
           ),
-          // Description Panel
-          Container(
-            width: double.infinity,
-            color: Colors.black87,
-            padding: const EdgeInsets.all(16),
-            child: Text(
-              description,
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontSize: 14,
+          const SizedBox(height: 8),
+          if (mediaType == 'video')
+            Container(
+              height: 120,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                color: Colors.black87,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  const Icon(
+                    Icons.play_circle_outline,
+                    size: 48,
+                    color: Colors.white54,
+                  ),
+                  Positioned(
+                    bottom: 8,
+                    left: 8,
+                    child: Text(
+                      'Video will be uploaded',
+                      style: GoogleFonts.poppins(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else if (imageUrl != null)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                imageUrl!,
+                height: 120,
+                width: double.infinity,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  height: 120,
+                  width: double.infinity,
+                  color: Colors.grey[200],
+                  child: Icon(
+                    Icons.broken_image,
+                    color: Colors.grey[400],
+                    size: 32,
+                  ),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
   }
 
   Widget _buildVideoPreview() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Stack(
+      alignment: Alignment.center,
       children: [
-        const Icon(
-          Icons.video_file,
-          size: 64,
-          color: Colors.white54,
-        ),
-        const SizedBox(height: 16),
-        Text(
-          'Video Preview',
-          style: GoogleFonts.poppins(
+        Container(
+          color: Colors.black87,
+          child: const Icon(
+            Icons.play_circle_outline,
+            size: 96,
             color: Colors.white54,
-            fontSize: 16,
           ),
         ),
-        const SizedBox(height: 24),
-        ElevatedButton.icon(
-          onPressed: () async {
-            final url = Uri.parse(imageUrl ?? '');
-            if (await canLaunchUrl(url)) {
-              await launchUrl(url, mode: LaunchMode.externalApplication);
-            }
-          },
-          icon: const Icon(Icons.play_arrow),
-          label: const Text('Play Video'),
-          style: ElevatedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 24,
-              vertical: 12,
+        Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(height: 120),
+            Text(
+              'Video Preview',
+              style: GoogleFonts.poppins(
+                color: Colors.white54,
+                fontSize: 18,
+                fontWeight: FontWeight.w500,
+              ),
             ),
-          ),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () async {
+                final url = Uri.parse(imageUrl ?? '');
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Play Video'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
+                backgroundColor: Colors.blue,
+                foregroundColor: Colors.white,
+                textStyle: GoogleFonts.poppins(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Video will open in your default video player',
+              style: GoogleFonts.poppins(
+                color: Colors.white38,
+                fontSize: 12,
+              ),
+            ),
+          ],
         ),
       ],
     );

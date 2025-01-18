@@ -1,7 +1,7 @@
 class Comment {
   final int id;
   final int bugReportId;
-  final int userId;
+  final int? userId;
   final String userName;
   final String comment;
   final DateTime createdAt;
@@ -9,7 +9,7 @@ class Comment {
   Comment({
     required this.id,
     required this.bugReportId,
-    required this.userId,
+    this.userId,
     required this.userName,
     required this.comment,
     required this.createdAt,
@@ -19,7 +19,9 @@ class Comment {
     return Comment(
       id: json['id'] is String ? int.parse(json['id']) : json['id'] as int,
       bugReportId: json['bug_report_id'] is String ? int.parse(json['bug_report_id']) : json['bug_report_id'] as int,
-      userId: json['user_id'] is String ? int.parse(json['user_id']) : json['user_id'] as int,
+      userId: json['user_id'] != null 
+          ? (json['user_id'] is String ? int.parse(json['user_id']) : json['user_id'] as int)
+          : null,
       userName: json['user_name'] as String,
       comment: json['comment'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),

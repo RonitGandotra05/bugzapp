@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 import '../models/bug_report.dart';
 import '../models/comment.dart';
-import 'package:timeago/timeago.dart' as timeago;
 import 'image_preview.dart';
 import 'dart:typed_data';
 import '../services/image_proxy_service.dart';
@@ -48,6 +48,7 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
   bool _isLoading = false;
   bool _isAddingComment = false;
   bool _shouldHighlight = false;
+  StreamSubscription<Comment>? _commentSubscription;
 
   String _formatToIST(DateTime utcTime) {
     final istTime = utcTime.add(const Duration(hours: 5, minutes: 30));
@@ -56,7 +57,8 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
 
   String _formatTime(DateTime time) {
     // Format as IST date and time
-    return '${time.day.toString().padLeft(2, '0')}/${time.month.toString().padLeft(2, '0')}/${time.year} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    final istTime = time.add(const Duration(hours: 5, minutes: 30));
+    return DateFormat("dd MMM yyyy, hh:mm a").format(istTime) + " IST";
   }
 
   String _getFormattedTime() {
@@ -65,16 +67,8 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
   }
 
   String _getTimeDisplay(DateTime utcTime) {
-    final now = DateTime.now().toUtc();
-    final difference = now.difference(utcTime);
-
-    if (difference.inDays < 1) {
-      // If less than 24 hours, show relative time
-      return timeago.format(utcTime);
-    } else {
-      // Otherwise show formatted IST time
-      return _formatToIST(utcTime);
-    }
+    // Always show IST time
+    return _formatTime(utcTime);
   }
 
   void _showBugDetails(BuildContext context) async {
@@ -139,10 +133,8 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
       return const SizedBox.shrink();
     }
 
-    // Sort comments by creation date, most recent first
-    final sortedComments = List.from(_comments)
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    final displayComments = sortedComments.take(3).toList();
+    // Use the already sorted comments list
+    final displayComments = _comments.take(3).toList();
 
     return Container(
       margin: const EdgeInsets.only(top: 16),
@@ -212,7 +204,7 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            timeago.format(comment.createdAt),
+                            _formatTime(comment.createdAt),
                             style: GoogleFonts.poppins(
                               fontSize: 10,
                               color: Colors.grey[500],
@@ -269,6 +261,120 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
     );
   }
 
+  Widget _buildCommentsList() {
+    return SizedBox(
+      width: double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Comments',
+            style: GoogleFonts.poppins(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 16),
+          if (_isLoadingComments)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: CircularProgressIndicator(),
+              ),
+            )
+          else if (_comments.isEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Text(
+                  'No comments yet',
+                  style: GoogleFonts.poppins(
+                    color: Colors.grey[600],
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _comments.length,
+              itemBuilder: (context, index) {
+                // Comments are already sorted in the service, so we can use them directly
+                final comment = _comments[index];
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 12,
+                                  backgroundColor: Colors.purple[100],
+                                  child: Text(
+                                    comment.userName[0].toUpperCase(),
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.purple[700],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  comment.userName,
+                                  style: GoogleFonts.poppins(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Text(
+                              _formatTime(comment.createdAt),
+                              style: GoogleFonts.poppins(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          comment.comment,
+                          style: GoogleFonts.poppins(
+                            fontSize: 13,
+                            color: Colors.grey[800],
+                            height: 1.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  void _loadCachedComments() {
+    if (!mounted) return;
+    setState(() {
+      _comments = widget.bugReportService.getCachedComments(widget.bug.id);
+      // Sort comments by creation date (newest first)
+      _comments.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -284,15 +390,8 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
       curve: Curves.easeOut,
     ));
     
-    // Get comments from cache instead of loading individually
+    // Get comments from cache
     _loadCachedComments();
-  }
-
-  void _loadCachedComments() {
-    if (!mounted) return;
-    setState(() {
-      _comments = widget.bugReportService.getCachedComments(widget.bug.id);
-    });
   }
 
   @override
@@ -529,17 +628,86 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
                               ),
                               const SizedBox(height: 12),
 
-                              // Image if available
+                              // Image/Video preview
                               if (widget.bug.imageUrl != null)
                                 ClipRRect(
                                   borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(
-                                    widget.bug.imageUrl!,
-                                    height: 120,
-                                    width: double.infinity,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => Container(),
-                                  ),
+                                  child: widget.bug.mediaType == 'video'
+                                    ? Stack(
+                                        alignment: Alignment.center,
+                                        children: [
+                                          Container(
+                                            height: 120,
+                                            width: double.infinity,
+                                            decoration: BoxDecoration(
+                                              color: Colors.black87,
+                                              image: DecorationImage(
+                                                image: NetworkImage(widget.bug.imageUrl!),
+                                                fit: BoxFit.cover,
+                                                onError: (_, __) {},
+                                              ),
+                                            ),
+                                          ),
+                                          Container(
+                                            width: 48,
+                                            height: 48,
+                                            decoration: BoxDecoration(
+                                              color: Colors.black54,
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(
+                                              Icons.play_arrow,
+                                              color: Colors.white,
+                                              size: 32,
+                                            ),
+                                          ),
+                                          Positioned(
+                                            bottom: 8,
+                                            right: 8,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black54,
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.videocam,
+                                                    color: Colors.white,
+                                                    size: 16,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    'Video',
+                                                    style: GoogleFonts.poppins(
+                                                      color: Colors.white,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Image.network(
+                                        widget.bug.imageUrl!,
+                                        height: 120,
+                                        width: double.infinity,
+                                        fit: BoxFit.cover,
+                                        errorBuilder: (_, __, ___) => Container(
+                                          height: 120,
+                                          width: double.infinity,
+                                          color: Colors.grey[200],
+                                          child: Icon(
+                                            Icons.broken_image,
+                                            color: Colors.grey[400],
+                                            size: 32,
+                                          ),
+                                        ),
+                                      ),
                                 ),
 
                               const SizedBox(height: 12),
@@ -578,11 +746,6 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                           ),
-                                          // Debug print
-                                          Builder(builder: (context) {
-                                            print('CC Recipients: ${widget.bug.ccRecipients}');
-                                            return const SizedBox.shrink();
-                                          }),
                                         ],
                                         if (widget.bug.tabUrl != null && widget.bug.tabUrl!.isNotEmpty)
                                           Text(
@@ -607,8 +770,12 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
                                 ],
                               ),
 
-                              // Add comments section at the end
-                              if (_comments.isNotEmpty) _buildCommentsSection(),
+                              // Latest Comment Preview
+                              if (_comments.isNotEmpty && !_isExpanded)
+                                _buildLatestCommentPreview(),
+
+                              // Full Comments Section when expanded
+                              if (_isExpanded) _buildCommentsSection(),
                             ],
                           ),
                         ),
@@ -678,6 +845,112 @@ class _BugCardState extends State<BugCard> with SingleTickerProviderStateMixin {
           fontSize: 11,
         ),
       ),
+    );
+  }
+
+  // Latest Comment Preview
+  Widget _buildLatestCommentPreview() {
+    if (_comments.isEmpty) return const SizedBox.shrink();
+
+    final latestComment = _comments.first; // Already sorted, first is latest
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        const Divider(height: 1),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Icon(Icons.comment_outlined, 
+              size: 14, 
+              color: Colors.grey[600]
+            ),
+            const SizedBox(width: 4),
+            Text(
+              'Latest Comment',
+              style: GoogleFonts.poppins(
+                fontWeight: FontWeight.w500,
+                fontSize: 11,
+                color: Colors.grey[700],
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '${_comments.length} comments',
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                color: Colors.grey[500],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              radius: 10,
+              backgroundColor: Colors.grey[200],
+              child: Text(
+                latestComment.userName[0].toUpperCase(),
+                style: GoogleFonts.poppins(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.grey[700],
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        latestComment.userName,
+                        style: GoogleFonts.poppins(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[800],
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '•',
+                        style: TextStyle(
+                          color: Colors.grey[400],
+                          fontSize: 11,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _formatTime(latestComment.createdAt),
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    latestComment.comment,
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      color: Colors.grey[700],
+                      height: 1.4,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
     );
   }
 } 
