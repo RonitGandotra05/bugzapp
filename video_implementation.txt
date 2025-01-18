@@ -1,0 +1,128 @@
+# Video Upload and Preview Implementation Documentation
+
+## Overview
+This document details the implementation of video upload functionality and preview handling in the BugZapp application.
+
+## Key Components
+
+### 1. Bug Report Service (`bug_report_service.dart`)
+- Handles video file uploads with proper MIME type detection
+- Sets correct content type headers for video files
+- Supports both mobile and web platforms
+- Maximum video size: 16MB
+- Supported formats: MP4, MOV, 3GPP
+
+```dart
+// Key implementation in uploadBugReport method
+if (mimeType?.startsWith('video/') == true || ['.mp4', '.mov', '.3gp'].contains(extension)) {
+  mediaType = 'video';
+  contentType = mimeType ?? 'video/mp4';
+  fileName = 'video$extension';
+}
+```
+
+### 2. Create Bug Screen (`create_bug_screen.dart`)
+- Implements video file selection and validation
+- Shows video preview before upload
+- Different preview handling for web and mobile platforms
+
+#### Mobile Preview
+```dart
+if (!kIsWeb && _mediaFile != null)
+  VideoThumbnail(
+    videoFile: _mediaFile!,
+    fit: BoxFit.cover,
+  )
+```
+
+#### Web Preview
+```dart
+Container(
+  decoration: BoxDecoration(
+    borderRadius: BorderRadius.circular(12),
+    color: Colors.black54,
+  ),
+  child: Icon(
+    Icons.play_circle_outline,
+    size: 64,
+    color: Colors.white70,
+  ),
+)
+```
+
+### 3. Video Thumbnail Widget (`video_thumbnail.dart`)
+- Custom widget for generating video thumbnails
+- Uses video_thumbnail package for thumbnail generation
+- Handles loading states and errors
+- Mobile-only functionality (not available on web)
+
+### 4. Bug Card Preview
+- Shows video thumbnail in bug card
+- Consistent preview across platforms
+- Play button overlay for video indication
+
+## Implementation Details
+
+### Video Upload Process
+1. File Selection:
+   - User selects video through gallery or camera
+   - System checks file extension and MIME type
+   - Validates file size (max 16MB)
+
+2. Preview Generation:
+   - Mobile: Generates actual thumbnail using VideoThumbnail widget
+   - Web: Shows placeholder with play icon
+   - Displays "Video ready for upload" indicator
+
+3. Upload Handling:
+   - Sets correct media_type = 'video' in form data
+   - Adds proper content type headers
+   - Sends file with correct MIME type
+
+### Preview Implementation
+1. Create Bug Screen:
+   - Shows real-time preview after selection
+   - Different UI for web and mobile platforms
+   - Clear indication of video vs image media type
+
+2. Bug Card:
+   - Displays video thumbnail consistently
+   - Play button overlay indicates video content
+   - Handles both web and mobile platforms
+
+## Platform-Specific Considerations
+
+### Mobile (Android/iOS)
+- Full thumbnail generation support
+- Native video file handling
+- Real-time preview generation
+
+### Web
+- Placeholder preview with play icon
+- No thumbnail generation (browser limitation)
+- Proper MIME type handling for upload
+
+## Error Handling
+- Validates file size before upload
+- Checks for supported video formats
+- Graceful fallback for unsupported formats
+- Clear error messages for users
+
+## Best Practices
+1. Always validate video files before upload
+2. Use proper MIME type detection
+3. Handle platform differences appropriately
+4. Provide clear visual feedback to users
+5. Implement proper error handling
+
+## Dependencies
+- video_thumbnail: ^0.5.3
+- path: ^1.8.0
+- mime: ^1.0.0
+- flutter: sdk: flutter
+
+## Notes
+- Video thumbnails are not generated on web platform due to browser limitations
+- Maximum video size is enforced at 16MB
+- Supported video formats: MP4, MOV, 3GPP
+- Preview implementation differs between web and mobile platforms 

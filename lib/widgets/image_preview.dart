@@ -3,6 +3,7 @@ import 'package:photo_view/photo_view.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/image_proxy_service.dart';
 
 class ImagePreview extends StatelessWidget {
@@ -58,35 +59,7 @@ class ImagePreview extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           if (mediaType == 'video')
-            Container(
-              height: 120,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  const Icon(
-                    Icons.play_circle_outline,
-                    size: 48,
-                    color: Colors.white54,
-                  ),
-                  Positioned(
-                    bottom: 8,
-                    left: 8,
-                    child: Text(
-                      'Video will be uploaded',
-                      style: GoogleFonts.poppins(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            )
+            _buildVideoPreview()
           else if (imageUrl != null)
             ClipRRect(
               borderRadius: BorderRadius.circular(12),
@@ -113,63 +86,117 @@ class ImagePreview extends StatelessWidget {
   }
 
   Widget _buildVideoPreview() {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        Container(
-          color: Colors.black87,
-          child: const Icon(
-            Icons.play_circle_outline,
-            size: 96,
-            color: Colors.white54,
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () async {
+            if (imageUrl != null) {
+              final url = Uri.parse(imageUrl!);
+              if (kIsWeb) {
+                await launchUrl(url, mode: LaunchMode.platformDefault);
+              } else {
+                await launchUrl(url, mode: LaunchMode.externalApplication);
+              }
+            }
+          },
+          borderRadius: BorderRadius.circular(12),
+          splashColor: Colors.purple.withOpacity(0.3),
+          highlightColor: Colors.purple.withOpacity(0.2),
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Gradient background
+              Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.purple.withOpacity(0.7),
+                      Colors.black87,
+                    ],
+                  ),
+                ),
+              ),
+              // Content Column
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Large play icon
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.play_arrow_rounded,
+                      size: 64,
+                      color: Colors.white,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Text
+                  Text(
+                    'Tap to play video',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Opens in browser',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white70,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+              // Video icon in corner
+              Positioned(
+                top: 16,
+                right: 16,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.black54,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.videocam,
+                        size: 16,
+                        color: Colors.white70,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Video',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white70,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
-        Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(height: 120),
-            Text(
-              'Video Preview',
-              style: GoogleFonts.poppins(
-                color: Colors.white54,
-                fontSize: 18,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () async {
-                final url = Uri.parse(imageUrl ?? '');
-                if (await canLaunchUrl(url)) {
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                }
-              },
-              icon: const Icon(Icons.play_arrow),
-              label: const Text('Play Video'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 32,
-                  vertical: 16,
-                ),
-                backgroundColor: Colors.blue,
-                foregroundColor: Colors.white,
-                textStyle: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Video will open in your default video player',
-              style: GoogleFonts.poppins(
-                color: Colors.white38,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ],
+      ),
     );
   }
 } 

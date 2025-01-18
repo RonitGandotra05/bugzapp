@@ -456,12 +456,75 @@ class BugReportService {
     List<String> ccRecipients = const [],
   }) async {
     try {
+      print('\n[BugReport Service] Starting bug report upload...');
       final dio = Dio();
       
       final token = await TokenStorage.getToken();
       dio.options.headers['Authorization'] = 'Bearer $token';
 
       final formData = FormData();
+      
+      // Determine media type and content type
+      String? mediaType;
+      String? contentType;
+      String? fileName;
+
+      if (imageFile != null || imageBytes != null) {
+        if (imageFile != null) {
+          final extension = path.extension(imageFile.path).toLowerCase();
+          final mimeType = lookupMimeType(imageFile.path);
+          print('[BugReport Service] File details:');
+          print('Path: ${imageFile.path}');
+          print('Extension: $extension');
+          print('Detected MIME: $mimeType');
+          
+          // Set media type and content type based on file type
+          if (mimeType?.startsWith('video/') == true || 
+              ['.mp4', '.mov', '.3gp'].contains(extension)) {
+            mediaType = 'video';
+            contentType = mimeType ?? 'video/mp4';
+            fileName = 'video$extension';
+            print('[BugReport Service] Identified as video file');
+          } else {
+            mediaType = 'image';
+            contentType = mimeType ?? 'image/png';
+            fileName = 'image$extension';
+            print('[BugReport Service] Identified as image file');
+          }
+
+          // Add the file to form data with proper content type
+          formData.files.add(
+            MapEntry(
+              'file',
+              await MultipartFile.fromFile(
+                imageFile.path,
+                filename: fileName,
+                contentType: MediaType.parse(contentType),
+              ),
+            ),
+          );
+          print('[BugReport Service] Added file to form data');
+        } else if (imageBytes != null) {
+          // For web uploads
+          mediaType = 'video'; // Support both image and video for web
+          contentType = 'video/mp4'; // Default to mp4 for videos
+          fileName = 'video.mp4';
+
+          formData.files.add(
+            MapEntry(
+              'file',
+              MultipartFile.fromBytes(
+                imageBytes,
+                filename: fileName,
+                contentType: MediaType.parse(contentType),
+              ),
+            ),
+          );
+          print('[BugReport Service] Added web bytes to form data');
+        }
+      }
+
+      // Add all form fields
       formData.fields.addAll([
         MapEntry('description', description),
         MapEntry('recipient_name', recipientName),
@@ -469,113 +532,43 @@ class BugReportService {
         if (projectId != null) MapEntry('project_id', projectId),
         if (tabUrl != null) MapEntry('tab_url', tabUrl),
         if (ccRecipients.isNotEmpty) MapEntry('cc_recipients', ccRecipients.join(',')),
+        if (mediaType != null) MapEntry('media_type', mediaType), // Add media type to form data
       ]);
 
-      print('[BugReport Service] Uploading bug report with fields:');
-      print('Description: $description');
-      print('Recipient Name: $recipientName');
+      print('\n[BugReport Service] Form data details:');
+      print('Description: ${description.length} chars');
+      print('Recipient: $recipientName');
       print('Severity: $severity');
       print('Project ID: $projectId');
       print('Tab URL: $tabUrl');
       print('CC Recipients: ${ccRecipients.join(',')}');
-
-      // Determine media type based on file extension and file type
-      String? mediaType;
-      String? contentType;
-      String? fileName;
-      
-      if (imageFile != null) {
-        final extension = path.extension(imageFile.path).toLowerCase();
-        final mimeType = lookupMimeType(imageFile.path);
-        print('[BugReport Service] File details - Path: ${imageFile.path}, Extension: $extension, Detected MIME: $mimeType');
-        
-        // Set media type and content type based on file type
-        if (mimeType?.startsWith('video/') == true || 
-            ['.mp4', '.mov', '.3gp'].contains(extension)) {
-          mediaType = 'video';
-          switch (extension) {
-            case '.mp4':
-              contentType = 'video/mp4';
-              break;
-            case '.mov':
-              contentType = 'video/quicktime';
-              break;
-            case '.3gp':
-              contentType = 'video/3gpp';
-              break;
-            default:
-              contentType = mimeType ?? 'video/mp4';
-          }
-          fileName = 'video-${DateTime.now().millisecondsSinceEpoch}$extension';
-        } else {
-          mediaType = 'image';
-          contentType = mimeType ?? 'image/png';
-          fileName = 'image-${DateTime.now().millisecondsSinceEpoch}${extension.isNotEmpty ? extension : '.png'}';
-        }
-
-        print('[BugReport Service] File type detection - Media Type: $mediaType, Content Type: $contentType, Filename: $fileName');
-
-        // Read file as bytes to ensure it's not empty
-        final bytes = await imageFile.readAsBytes();
-        if (bytes.isEmpty) {
-          throw Exception('File is empty');
-        }
-
-        // Add file to form data
-        formData.files.add(
-          MapEntry(
-            'file',
-            MultipartFile.fromBytes(
-              bytes,
-              filename: fileName,
-              contentType: MediaType.parse(contentType ?? 'application/octet-stream'),
-            ),
-          ),
-        );
-
-        // Add media type to form data
-        formData.fields.add(MapEntry('media_type', mediaType ?? 'image'));
-      } else if (imageBytes != null) {
-        mediaType = 'image';
-        contentType = 'image/png';
-        fileName = 'image-${DateTime.now().millisecondsSinceEpoch}.png';
-
-        formData.files.add(
-          MapEntry(
-            'file',
-            MultipartFile.fromBytes(
-              imageBytes,
-              filename: fileName,
-              contentType: MediaType.parse(contentType),
-            ),
-          ),
-        );
-        formData.fields.add(MapEntry('media_type', mediaType ?? 'image'));
-      }
+      print('Media Type: $mediaType');
+      print('Content Type: $contentType');
+      print('File Name: $fileName');
 
       final response = await dio.post(
         '${ApiConstants.baseUrl}/upload',
         data: formData,
         options: Options(
-          validateStatus: (status) => status! < 500,
           headers: {
-            'Accept': '*/*',
-            'Content-Type': 'multipart/form-data',
+            'Authorization': 'Bearer $token',
+            if (contentType != null) 'Content-Type': contentType,
           },
+          validateStatus: (status) => status! < 500,
         ),
       );
 
-      if (response.statusCode == 200 || response.statusCode == 201) {
-        print('[BugReport Service] Upload successful: ${response.data}');
-        // Clear the cache to force a refresh
-        _cachedBugReports = null;
-        _commentCache.clear();
-      } else {
-        print('[BugReport Service] Upload failed with status ${response.statusCode}: ${response.data}');
-        throw Exception('Failed to upload bug report: ${response.statusCode}');
+      print('\n[BugReport Service] Upload response:');
+      print('Status code: ${response.statusCode}');
+      print('Response data: ${response.data}');
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        throw Exception('Failed to upload bug report: ${response.statusCode} - ${response.data}');
       }
+
+      print('[BugReport Service] Bug report uploaded successfully');
     } catch (e) {
-      print('Error uploading bug report: $e');
+      print('[BugReport Service] Error uploading bug report: $e');
       rethrow;
     }
   }
