@@ -1,8 +1,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:video_thumbnail/video_thumbnail.dart' as vt;
+import 'package:google_fonts/google_fonts.dart';
 
-class VideoThumbnail extends StatefulWidget {
+class VideoThumbnail extends StatelessWidget {
   final File videoFile;
 
   const VideoThumbnail({
@@ -11,91 +11,63 @@ class VideoThumbnail extends StatefulWidget {
   }) : super(key: key);
 
   @override
-  State<VideoThumbnail> createState() => _VideoThumbnailState();
-}
-
-class _VideoThumbnailState extends State<VideoThumbnail> {
-  Uint8List? _thumbnailBytes;
-  bool _isLoading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _generateThumbnail();
-  }
-
-  Future<void> _generateThumbnail() async {
-    try {
-      final thumbnailBytes = await vt.VideoThumbnail.thumbnailData(
-        video: widget.videoFile.path,
-        imageFormat: vt.ImageFormat.JPEG,
-        maxWidth: 512,
-        quality: 75,
-      );
-
-      if (mounted) {
-        setState(() {
-          _thumbnailBytes = thumbnailBytes;
-          _isLoading = false;
-        });
-      }
-    } catch (e) {
-      print('Error generating video thumbnail: $e');
-      if (mounted) {
-        setState(() {
-          _error = 'Error loading preview';
-          _isLoading = false;
-        });
-      }
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (_isLoading) {
-      return const Center(
-        child: SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-          ),
-        ),
-      );
-    }
-
-    if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.error_outline, color: Colors.red),
-            const SizedBox(height: 8),
-            Text(
-              _error!,
-              style: const TextStyle(color: Colors.red),
-              textAlign: TextAlign.center,
+    return Container(
+      height: 200,
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // Play button with semi-transparent background
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              shape: BoxShape.circle,
             ),
-          ],
-        ),
-      );
-    }
-
-    if (_thumbnailBytes != null) {
-      return Image.memory(
-        _thumbnailBytes!,
-        height: 150,
-        width: double.infinity,
-        fit: BoxFit.cover,
-      );
-    }
-
-    return const Center(
-      child: Icon(
-        Icons.video_file,
-        size: 48,
-        color: Colors.white54,
+            child: const Icon(
+              Icons.play_arrow_rounded,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
+          // Video indicator badge
+          Positioned(
+            top: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.7),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.videocam,
+                    size: 12,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Video',
+                    style: GoogleFonts.poppins(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

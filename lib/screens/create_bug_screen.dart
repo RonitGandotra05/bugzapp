@@ -9,6 +9,9 @@ import 'package:video_player/video_player.dart';
 import 'package:universal_html/html.dart' as html;
 import 'package:google_fonts/google_fonts.dart';
 import '../widgets/video_thumbnail.dart';
+import 'package:video_compress/video_compress.dart';
+import 'package:percent_indicator/percent_indicator.dart';
+import 'package:image_picker/image_picker.dart';
 
 class _CreateBugScreenState extends State<CreateBugScreen> {
   final _formKey = GlobalKey<FormState>();
@@ -41,6 +44,12 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
   List<User> _availableUsers = [];
   List<Project> _projects = [];
   final BugReportService _bugReportService = BugReportService();
+  
+  // New variables
+  double _uploadProgress = 0.0;
+  bool _isCompressing = false;
+  XFile? _webVideoFile;
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -107,175 +116,173 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
     await _loadData();
   }
 
-  Future<void> _submitBugReport() async {
-    print('\n[CreateBugScreen] Starting bug report submission...');
-    print('Current State:');
-    print('Description: ${_descriptionController.text.length} chars');
-    print('Selected Recipient: $_selectedRecipientId');
-    print('Selected Project: $_selectedProjectId');
-    print('Has Media File: ${_mediaFile != null}');
-    print('Has Web Media: ${_webMediaBytes != null}');
-    print('Media Type: $_mediaType');
-    print('MIME Type: $_mimeType');
-    print('Severity: $_selectedSeverity');
-    
-    // 1. Check if data is still loading
-    if (_isInitializing || _isLoading) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please wait while data is loading...'),
-          backgroundColor: Colors.orange,
-        ),
-      );
-      return;
+  Future<bool> _validateMedia() async {
+    if (_mediaFile == null && _webMediaBytes == null) {
+      throw Exception('Please add an image or video');
     }
 
-    // 2. Check if required data is loaded
-    if (_availableUsers.isEmpty || _projects.isEmpty) {
-      print('[CreateBugScreen] Error: Required data not loaded');
-      print('Available users: ${_availableUsers.length}');
-      print('Available projects: ${_projects.length}');
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Required data not loaded. Please try again.'),
-          backgroundColor: Colors.red,
-          action: SnackBarAction(
-            label: 'Retry',
-            textColor: Colors.white,
-            onPressed: _retryLoadData,
-          ),
-        ),
-      );
-      return;
-    }
+    print('\n[Media] Validating media before upload:');
+    print('Media Type: $_mediaType');
+    print('Has File: ${_mediaFile != null}');
+    print('Has Web Bytes: ${_webMediaBytes != null}');
 
     try {
-      // 3. Validate description
-      final description = _descriptionController.text.trim();
-      if (description.isEmpty) {
-        throw Exception('Description is required');
-      }
-      if (description.length < 10) {
-        throw Exception('Description must be at least 10 characters long');
+      if (_mediaType == 'video') {
+        if (kIsWeb) {
+          if (_webMediaBytes == null || _webMediaBytes!.isEmpty) {
+            throw Exception('Video file is not loaded properly');
+          }
+          print('[Media] Web video size: ${_webMediaBytes!.length} bytes');
+        } else {
+          if (_mediaFile == null || !await _mediaFile!.exists()) {
+            throw Exception('Video file is not loaded properly');
+          }
+          final fileSize = await _mediaFile!.length();
+          print('[Media] Video file size: ${fileSize} bytes');
+          if (fileSize == 0) {
+            throw Exception('Video file is empty');
+          }
+        }
+      } else if (_mediaType == 'image') {
+        if (kIsWeb) {
+          if (_webMediaBytes == null || _webMediaBytes!.isEmpty) {
+            throw Exception('Image is not loaded properly');
+          }
+          if (_webMediaBytes!.length > 10 * 1024 * 1024) {
+            throw Exception('Image size must be less than 10MB');
+          }
+        } else {
+          if (_mediaFile == null || !await _mediaFile!.exists()) {
+            throw Exception('Image file is not loaded properly');
+          }
+          final fileSize = await _mediaFile!.length();
+          if (fileSize == 0) {
+            throw Exception('Image file is empty');
+          }
+          if (fileSize > 10 * 1024 * 1024) {
+            throw Exception('Image size must be less than 10MB');
+          }
+        }
+      } else {
+        throw Exception('Invalid media type');
       }
 
-      // 4. Validate recipient
+      print('[Media] Media validation successful');
+      return true;
+    } catch (e) {
+      print('[Media] Media validation failed: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> _submitBugReport() async {
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = true;
+      _isUploading = true;
+      _uploadProgress = 0.0;
+    });
+
+    try {
+      // Validate all required fields
+      if (_descriptionController.text.trim().isEmpty) {
+        throw Exception('Description is required');
+      }
       if (_selectedRecipientId == null || _selectedRecipientId!.isEmpty) {
         throw Exception('Please select a recipient');
       }
-      final selectedUser = _availableUsers.firstWhere(
-        (user) => user.id.toString() == _selectedRecipientId,
-        orElse: () {
-          print('[CreateBugScreen] Selected recipient not found:');
-          print('Selected ID: $_selectedRecipientId');
-          print('Available users: ${_availableUsers.map((u) => '${u.id}: ${u.name}').join(', ')}');
-          throw Exception('Selected recipient not found in available users');
-        },
-      );
-
-      // 5. Validate project
       if (_selectedProjectId == null || _selectedProjectId!.isEmpty) {
         throw Exception('Please select a project');
       }
-      final selectedProject = _projects.firstWhere(
-        (project) => project.id.toString() == _selectedProjectId,
-        orElse: () {
-          print('[CreateBugScreen] Selected project not found:');
-          print('Selected ID: $_selectedProjectId');
-          print('Available projects: ${_projects.map((p) => '${p.id}: ${p.name}').join(', ')}');
-          throw Exception('Selected project not found in available projects');
-        },
-      );
 
-      // 6. Validate media
-      if (_mediaFile == null && _webMediaBytes == null) {
-        throw Exception('Please add an image or video');
-      }
+      // Create form data
+      final formData = {
+        'description': _descriptionController.text.trim(),
+        'tab_url': _tabUrlController.text.trim(),
+        'recipient_id': _selectedRecipientId,
+        'project_id': _selectedProjectId,
+      };
 
-      // 7. Validate media size based on type
-      if (_mediaType == 'video') {
-        if (_mediaFile != null) {
-          final stat = await _mediaFile!.stat();
-          if (stat.size > 16 * 1024 * 1024) {
-            throw Exception('Video size exceeds 16MB limit');
-          }
-        } else if (_webMediaBytes != null && _webMediaBytes!.lengthInBytes > 16 * 1024 * 1024) {
-          throw Exception('Video size exceeds 16MB limit');
-        }
-      } else {
-        // Image validation
-        if (_mediaFile != null) {
-          final bytes = await _mediaFile!.readAsBytes();
-          if (bytes.isEmpty) {
-            throw Exception('Selected image is empty');
-          }
-          if (bytes.lengthInBytes > 10 * 1024 * 1024) {
-            throw Exception('Image size exceeds 10MB limit');
-          }
-        } else if (_webMediaBytes != null) {
-          if (_webMediaBytes!.isEmpty) {
-            throw Exception('Selected image is empty');
-          }
-          if (_webMediaBytes!.lengthInBytes > 10 * 1024 * 1024) {
-            throw Exception('Image size exceeds 10MB limit');
-          }
-        }
-      }
+      // Upload with progress tracking
+      if (_mediaFile != null || _webMediaBytes != null || _webVideoFile != null) {
+        print('[Submit] Starting upload with media type: $_mediaType');
+        print('[Submit] Media details:');
+        print('Has File: ${_mediaFile != null}');
+        print('Has Web Bytes: ${_webMediaBytes != null}');
+        print('Has Web Video: ${_webVideoFile != null}');
+        print('Media Type: $_mediaType');
+        print('MIME Type: $_mimeType');
 
-      print('\n[CreateBugScreen] All validations passed:');
-      print('Description: $description');
-      print('Recipient: ${selectedUser.name} (ID: ${selectedUser.id})');
-      print('Project: ${selectedProject.name} (ID: ${selectedProject.id})');
-      print('Severity: $_selectedSeverity');
-      print('Media Type: $_mediaType');
-      print('Has Media File: ${_mediaFile != null}');
-      print('Has Web Media: ${_webMediaBytes != null}');
-
-      // Set loading state after all validations pass
-      setState(() => _isLoading = true);
-
-      // Submit the bug report
       await _bugReportService.uploadBugReport(
-        description: description,
-        recipientName: selectedUser.name,
-        imageFile: _mediaFile,
-        imageBytes: _webMediaBytes,
-        severity: _selectedSeverity,
-        projectId: _selectedProjectId,
-        tabUrl: _tabUrlController.text.trim(),
-        ccRecipients: _selectedCCRecipients,
-      );
+          description: formData['description']!,
+          tabUrl: formData['tab_url']!,
+          recipientId: formData['recipient_id']!,
+          projectId: formData['project_id']!,
+          mediaFile: _mediaFile,
+          webMediaBytes: _webMediaBytes,
+          webVideoFile: _webVideoFile,
+          mediaType: _mediaType,
+          mimeType: _mimeType,
+          onProgress: (progress) {
+            if (mounted) {
+              print('[Submit] Upload progress: ${(progress * 100).toStringAsFixed(1)}%');
+              setState(() {
+                _uploadProgress = progress;
+                _isUploading = true;
+                _isLoading = true;
+              });
+            }
+          },
+        );
+        print('[Submit] Upload completed successfully');
+      } else {
+        print('[Submit] Uploading bug report without media...');
+        await _bugReportService.uploadBugReport(
+          description: formData['description']!,
+          tabUrl: formData['tab_url']!,
+          recipientId: formData['recipient_id']!,
+          projectId: formData['project_id']!,
+        );
+      }
 
       if (!mounted) return;
 
+      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Bug report created successfully'),
+          content: Text('Bug report submitted successfully'),
           backgroundColor: Colors.green,
         ),
       );
-      Navigator.pop(context, true);
+
+      // Clear form
+      _cleanupMedia();
+      _descriptionController.clear();
+      _tabUrlController.clear();
+      setState(() {
+        _selectedRecipientId = null;
+        _selectedProjectId = null;
+        _isLoading = false;
+        _isUploading = false;
+        _uploadProgress = 0.0;
+      });
+
     } catch (e) {
-      print('[CreateBugScreen] Error creating bug report: $e');
+      print('[Submit] Error submitting bug report: $e');
       if (!mounted) return;
       
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error: ${e.toString().replaceAll('Exception: ', '')}'),
+          content: Text(e.toString().replaceAll('Exception: ', '')),
           backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5),
-          action: SnackBarAction(
-            label: 'Retry',
-            textColor: Colors.white,
-            onPressed: _submitBugReport,
-          ),
         ),
       );
-    } finally {
-      if (mounted) {
-        setState(() => _isLoading = false);
-      }
+      setState(() {
+        _isLoading = false;
+        _isUploading = false;
+        _uploadProgress = 0.0;
+      });
     }
   }
 
@@ -330,7 +337,10 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
   Future<void> _processMediaFile(XFile file) async {
     if (!mounted) return;
     
-    setState(() => _isProcessingMedia = true);
+    setState(() {
+      _isProcessingMedia = true;
+      _isCompressing = true;
+    });
     
     try {
       print('[Media] Processing file: ${file.path}');
@@ -341,76 +351,132 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
       final isVideo = mimeType?.startsWith('video/') == true || 
           ['.mp4', '.mov', '.3gp'].contains(extension);
       
+      if (isVideo) {
+        print('[Media] Processing video file');
+        setState(() {
+          _mediaType = 'video';
+          _mimeType = mimeType ?? 'video/mp4';
+          _lastImagePath = null;
+          _webMediaBytes = null;
+        });
+
       if (kIsWeb) {
-        final bytes = await file.readAsBytes();
-        if (!mounted) return;
-        
-        if (bytes.isEmpty) {
-          throw Exception('Selected file is empty');
-        }
-        
-        if (isVideo) {
-          if (bytes.lengthInBytes > 16 * 1024 * 1024) {
-            throw Exception('Video size exceeds 16MB limit');
-          }
-          // For videos in web, store the bytes and set media type
-          setState(() {
-            _mediaFile = null;
-            _webMediaBytes = bytes;  // Store the bytes for upload
-            _mediaType = 'video';
-            _mimeType = mimeType ?? 'video/mp4';  // Default to mp4 if mime type is null
-            _lastImagePath = file.path;
-          });
-          print('[Media] Video file selected for web, size: ${bytes.length} bytes');
-          print('[Media] MIME type: $_mimeType');
+          // For web, store file reference and read bytes in chunks
+          _mediaFile = null;
+          _webVideoFile = file;
+          
+          // Read file in chunks to avoid memory issues
+          final reader = html.FileReader();
+          final blob = html.Blob([await file.readAsBytes()]);
+          reader.readAsArrayBuffer(blob);
+          
+          await reader.onLoad.first;
+          final bytes = reader.result as Uint8List;
+          _webMediaBytes = bytes;
+          print('[Media] Stored web video bytes: ${bytes.length} bytes');
         } else {
-          if (bytes.lengthInBytes > 10 * 1024 * 1024) {
-            throw Exception('Image size exceeds 10MB limit');
+          // For mobile, use aggressive video compression
+          try {
+            print('[Media] Compressing video...');
+            final MediaInfo? mediaInfo = await VideoCompress.compressVideo(
+              file.path,
+              quality: VideoQuality.LowQuality,
+              deleteOrigin: false,
+              frameRate: 24,
+              includeAudio: true,
+              scale: 0.5, // Scale down video dimensions
+            );
+
+            if (mediaInfo?.file != null) {
+              final originalSize = await File(file.path).length();
+              final compressedSize = await mediaInfo!.file!.length();
+              _mediaFile = mediaInfo.file!;
+              print('[Media] Compressed video from ${originalSize} to ${compressedSize} bytes');
+              print('[Media] Compression ratio: ${(compressedSize / originalSize * 100).toStringAsFixed(1)}%');
+            } else {
+              throw Exception('Failed to compress video');
+            }
+          } catch (e) {
+            print('[Media] Error compressing video: $e');
+            throw Exception('Failed to process video. Please try again.');
           }
-          setState(() {
-            _webMediaBytes = bytes;
-            _mediaFile = null;
-            _mediaType = 'image';
-            _mimeType = mimeType ?? 'image/png';  // Default to png if mime type is null
-            _lastImagePath = null;
-          });
         }
       } else {
-        final path = file.path;
-        final newFile = File(path);
-        
-        if (isVideo) {
-          // For videos, check size but don't read bytes for preview
-          final stat = await newFile.stat();
-          if (stat.size > 16 * 1024 * 1024) {
-            throw Exception('Video size exceeds 16MB limit');
-          }
+        // Handle image files with optimized compression
+        print('[Media] Processing image file');
+        final validImageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic'];
+        final isValidImage = validImageExtensions.contains(extension) || 
+            (mimeType?.startsWith('image/') ?? false);
+            
+        if (!isValidImage) {
+          throw Exception('Unsupported image format. Please use: JPG, PNG, GIF, WebP, BMP, or HEIC');
+        }
 
-          setState(() {
-            _mediaFile = newFile;
-            _webMediaBytes = null;
-            _mediaType = 'video';
-            _mimeType = mimeType ?? 'video/mp4';  // Default to mp4 if mime type is null
-            _lastImagePath = path;
-          });
-          print('[Media] Video file selected for mobile, size: ${stat.size} bytes');
-          print('[Media] MIME type: $_mimeType');
-        } else {
-          // For images, read bytes for preview
-          final bytes = await newFile.readAsBytes();
-          if (!mounted) return;
+        setState(() {
+          _mediaType = 'image';
+          // Set appropriate MIME type based on extension
+          _mimeType = mimeType ?? switch (extension) {
+            '.jpg' || '.jpeg' => 'image/jpeg',
+            '.png' => 'image/png',
+            '.gif' => 'image/gif',
+            '.webp' => 'image/webp',
+            '.bmp' => 'image/bmp',
+            '.heic' => 'image/heic',
+            _ => 'image/jpeg' // default to JPEG
+          };
+          _lastImagePath = null;
+          _webVideoFile = null;
+        });
+
+        if (kIsWeb) {
+          // For web, use more aggressive compression for supported formats
+          final ImagePicker picker = ImagePicker();
+          final XFile? compressedFile = await picker.pickImage(
+            source: ImageSource.memory,
+            imageQuality: _mimeType == 'image/gif' ? 100 : 60, // Don't compress GIFs
+            maxWidth: 1280,
+            maxHeight: 720,
+            bytes: await file.readAsBytes(),
+            preferredCameraDevice: CameraDevice.rear,
+          );
           
-          if (bytes.lengthInBytes > 10 * 1024 * 1024) {
-            throw Exception('Image size exceeds 10MB limit');
+          if (compressedFile != null) {
+            _webMediaBytes = await compressedFile.readAsBytes();
+            final originalSize = await file.length();
+            print('[Media] Compressed web image from ${originalSize} to ${_webMediaBytes!.length} bytes');
+            print('[Media] Compression ratio: ${(_webMediaBytes!.length / originalSize * 100).toStringAsFixed(1)}%');
+          } else {
+            throw Exception('Failed to process image');
           }
-
-          setState(() {
-            _mediaFile = newFile;
-            _webMediaBytes = null;
-            _mediaType = 'image';
-            _mimeType = mimeType ?? 'image/png';  // Default to png if mime type is null
-            _lastImagePath = null;
-          });
+          _mediaFile = null;
+        } else {
+          // For mobile, use optimized compression for supported formats
+          if (_mimeType == 'image/gif') {
+            // For GIFs, use the original file without compression
+            _mediaFile = File(file.path);
+            print('[Media] Using original GIF file without compression');
+          } else {
+            final ImagePicker picker = ImagePicker();
+            final XFile? compressedFile = await picker.pickImage(
+              source: ImageSource.path,
+              imageQuality: 60,
+              maxWidth: 1280,
+              maxHeight: 720,
+              path: file.path,
+              preferredCameraDevice: CameraDevice.rear,
+            );
+            
+            if (compressedFile != null) {
+              _mediaFile = File(compressedFile.path);
+              final originalSize = await file.length();
+              final compressedSize = await _mediaFile!.length();
+              print('[Media] Compressed mobile image from ${originalSize} to ${compressedSize} bytes');
+              print('[Media] Compression ratio: ${(compressedSize / originalSize * 100).toStringAsFixed(1)}%');
+            } else {
+              throw Exception('Failed to process image');
+            }
+          }
+          _webMediaBytes = null;
         }
       }
       
@@ -419,7 +485,7 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
       print('MIME: $_mimeType');
       print('Has File: ${_mediaFile != null}');
       print('Has Web Bytes: ${_webMediaBytes != null}');
-      print('File Path: ${_lastImagePath ?? "none"}');
+      print('Has Web Video: ${_webVideoFile != null}');
     } catch (e) {
       print('[Media] Error processing media: $e');
       if (!mounted) return;
@@ -433,7 +499,10 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
       );
     } finally {
       if (mounted) {
-        setState(() => _isProcessingMedia = false);
+        setState(() {
+          _isProcessingMedia = false;
+          _isCompressing = false;
+        });
       }
     }
   }
@@ -483,6 +552,7 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
     setState(() {
       _mediaFile = null;
       _webMediaBytes = null;
+      _webVideoFile = null;
       _mediaType = null;
       _mimeType = null;
       _lastImagePath = null;
@@ -490,679 +560,149 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
     });
   }
 
-  Widget _buildMediaPreview() {
-    if (_isProcessingMedia) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    // Early return if no media
-    if (_mediaType == null || (_mediaFile == null && _webMediaBytes == null && _lastImagePath == null)) {
-      return const SizedBox.shrink();
-    }
-
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                _mediaType == 'video' ? Icons.videocam : Icons.image,
-                size: 16,
-                color: Colors.green[700],
-              ),
-              const SizedBox(width: 8),
-              Text(
-                _mediaType == 'video' ? 'Video Preview' : 'Image Preview',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  color: Colors.green[700],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_mediaType == 'video')
-            Container(
-              height: 120,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: Colors.black87,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  if (!kIsWeb && _mediaFile != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: VideoThumbnail(videoFile: _mediaFile!),
-                    )
-                  else
-                    const Icon(
-                      Icons.play_circle_outline,
-                      size: 48,
-                      color: Colors.white54,
-                    ),
-                  Positioned(
-                    bottom: 8,
-                    left: 8,
-                    child: Text(
-                      'Video ready for upload',
-                      style: GoogleFonts.poppins(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else if (_mediaType == 'image')
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: kIsWeb && _webMediaBytes != null
-                ? Image.memory(
-                    _webMediaBytes!,
-                    height: 200,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => Container(
-                      height: 200,
-                      width: double.infinity,
-                      color: Colors.grey[200],
-                      child: Icon(
-                        Icons.broken_image,
-                        color: Colors.grey[400],
-                        size: 32,
-                      ),
-                    ),
-                  )
-                : !kIsWeb && _mediaFile != null
-                  ? Image.file(
-                      _mediaFile!,
-                      height: 200,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => Container(
-                        height: 200,
-                        width: double.infinity,
-                        color: Colors.grey[200],
-                        child: Icon(
-                          Icons.broken_image,
-                          color: Colors.grey[400],
-                          size: 32,
-                        ),
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                _mediaType == 'video' ? 'Video ready to upload' : 'Image ready to upload',
-                style: GoogleFonts.poppins(
-                  color: Colors.green[700],
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              TextButton.icon(
-                icon: const Icon(Icons.delete, color: Colors.red),
-                label: Text(
-                  'Remove',
-                  style: GoogleFonts.poppins(color: Colors.red),
-                ),
-                onPressed: _cleanupMedia,
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showMediaPicker() async {
-    if (!mounted) return;
-
-    final action = await showDialog<String>(
-      context: context,
-      builder: (BuildContext context) => AlertDialog(
-        title: Text('Add Media', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt, color: Colors.purple),
-              title: Text('Camera', style: GoogleFonts.poppins()),
-              subtitle: Text('Take a photo', style: GoogleFonts.poppins(fontSize: 12)),
-              onTap: () => Navigator.pop(context, 'camera_photo'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.videocam, color: Colors.purple),
-              title: Text('Video', style: GoogleFonts.poppins()),
-              subtitle: Text('Record a video', style: GoogleFonts.poppins(fontSize: 12)),
-              onTap: () => Navigator.pop(context, 'camera_video'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library, color: Colors.purple),
-              title: Text('Gallery', style: GoogleFonts.poppins()),
-              subtitle: Text('Choose existing photo', style: GoogleFonts.poppins(fontSize: 12)),
-              onTap: () => Navigator.pop(context, 'gallery_photo'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.video_library, color: Colors.purple),
-              title: Text('Video Gallery', style: GoogleFonts.poppins()),
-              subtitle: Text('Choose existing video', style: GoogleFonts.poppins(fontSize: 12)),
-              onTap: () => Navigator.pop(context, 'gallery_video'),
-            ),
-          ],
-        ),
-      ),
-    );
-
-    if (!mounted || action == null) return;
-
-    try {
-      XFile? file;
-      switch (action) {
-        case 'camera_photo':
-          file = await ImagePicker().pickImage(
-            source: ImageSource.camera,
-            imageQuality: 85,
-            maxWidth: 1920,
-            maxHeight: 1080,
-          );
-          break;
-        case 'camera_video':
-          file = await ImagePicker().pickVideo(
-            source: ImageSource.camera,
-            maxDuration: const Duration(minutes: 5),
-          );
-          break;
-        case 'gallery_photo':
-          file = await ImagePicker().pickImage(
-            source: ImageSource.gallery,
-            imageQuality: 85,
-            maxWidth: 1920,
-            maxHeight: 1080,
-          );
-          break;
-        case 'gallery_video':
-          file = await ImagePicker().pickVideo(
-            source: ImageSource.gallery,
-            maxDuration: const Duration(minutes: 5),
-          );
-          break;
-      }
-
-      if (file != null) {
-        await _processMediaFile(file);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error selecting media: ${e.toString()}'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Widget _buildProjectDropdown() {
-    print('[CreateBugScreen] Building project dropdown');
-    print('Current selected project ID: $_selectedProjectId');
-    print('Available projects: ${_projects.map((p) => '${p.id}: ${p.name}').join(', ')}');
-
-    return DropdownButtonFormField<String>(
-      decoration: InputDecoration(
-        labelText: 'Project *',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.purple[300]!),
-        ),
-        filled: true,
-        fillColor: Colors.grey[50],
-      ),
-      value: _selectedProjectId,
-      items: _projects.map((project) {
-        return DropdownMenuItem(
-          value: project.id.toString(),
-          child: Text(project.name),
-        );
-      }).toList(),
-      onChanged: (value) {
-        print('[CreateBugScreen] Project selection changed to: $value');
-        setState(() => _selectedProjectId = value);
-      },
-      validator: (value) {
-        print('[CreateBugScreen] Validating project selection: $value');
-        if (value == null || value.isEmpty) {
-          return 'Project is required';
-        }
-        if (!_projects.any((p) => p.id.toString() == value)) {
-          return 'Invalid project selected';
-        }
-        return null;
-      },
-    );
-  }
-
-  Widget _buildRecipientDropdown() {
-    print('[CreateBugScreen] Building recipient dropdown');
-    print('Current selected recipient ID: $_selectedRecipientId');
-    print('Available users: ${_availableUsers.map((u) => '${u.id}: ${u.name}').join(', ')}');
-
-    return DropdownButtonFormField<String>(
-      decoration: InputDecoration(
-        labelText: 'Recipient *',
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.purple[300]!),
-        ),
-        filled: true,
-        fillColor: Colors.grey[50],
-      ),
-      value: _selectedRecipientId,
-      items: _availableUsers.map((user) {
-        return DropdownMenuItem(
-          value: user.id.toString(),
-          child: Text(user.name),
-        );
-      }).toList(),
-      onChanged: (value) {
-        print('[CreateBugScreen] Recipient selection changed to: $value');
-        setState(() => _selectedRecipientId = value);
-      },
-      validator: (value) {
-        print('[CreateBugScreen] Validating recipient selection: $value');
-        if (value == null || value.isEmpty) {
-          return 'Recipient is required';
-        }
-        if (!_availableUsers.any((u) => u.id.toString() == value)) {
-          return 'Invalid recipient selected';
-        }
-        return null;
-      },
-    );
-  }
-
-  Widget _buildMediaButtons() {
-    if (_isProcessingMedia) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(16.0),
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        Column(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.camera_alt),
-              onPressed: () async {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: Text('Select Media Type', style: GoogleFonts.poppins()),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.photo_camera),
-                          title: Text('Take Photo', style: GoogleFonts.poppins()),
-                          onTap: () async {
-                            Navigator.pop(context);
-                            final ImagePicker picker = ImagePicker();
-                            final XFile? photo = await picker.pickImage(
-                              source: ImageSource.camera,
-                              imageQuality: 85,
-                              maxWidth: 1920,
-                              maxHeight: 1080,
-                            );
-                            if (photo != null) {
-                              await _processMediaFile(photo);
-                            }
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.videocam),
-                          title: Text('Record Video', style: GoogleFonts.poppins()),
-                          onTap: () async {
-                            Navigator.pop(context);
-                            final ImagePicker picker = ImagePicker();
-                            final XFile? video = await picker.pickVideo(
-                              source: ImageSource.camera,
-                              maxDuration: const Duration(minutes: 5),
-                            );
-                            if (video != null) {
-                              await _processMediaFile(video);
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-            Text('Camera', style: GoogleFonts.poppins()),
-          ],
-        ),
-        Column(
-          children: [
-            IconButton(
-              icon: const Icon(Icons.photo_library),
-              onPressed: () async {
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: Text('Select Media Type', style: GoogleFonts.poppins()),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        ListTile(
-                          leading: const Icon(Icons.photo),
-                          title: Text('Choose Photo', style: GoogleFonts.poppins()),
-                          onTap: () async {
-                            Navigator.pop(context);
-                            final ImagePicker picker = ImagePicker();
-                            final XFile? photo = await picker.pickImage(
-                              source: ImageSource.gallery,
-                              imageQuality: 85,
-                              maxWidth: 1920,
-                              maxHeight: 1080,
-                            );
-                            if (photo != null) {
-                              await _processMediaFile(photo);
-                            }
-                          },
-                        ),
-                        ListTile(
-                          leading: const Icon(Icons.video_library),
-                          title: Text('Choose Video', style: GoogleFonts.poppins()),
-                          onTap: () async {
-                            Navigator.pop(context);
-                            final ImagePicker picker = ImagePicker();
-                            final XFile? video = await picker.pickVideo(
-                              source: ImageSource.gallery,
-                              maxDuration: const Duration(minutes: 5),
-                            );
-                            if (video != null) {
-                              await _processMediaFile(video);
-                            }
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-            Text('Gallery', style: GoogleFonts.poppins()),
-          ],
-        ),
-      ],
-    );
-  }
-
   Widget _buildMediaSection() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: _mediaFile == null && _webMediaBytes == null 
-            ? Colors.red 
-            : Colors.grey[300]!,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
-              Text(
-                'Media *',
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-              if (_mediaFile == null && _webMediaBytes == null)
-                Padding(
-                  padding: const EdgeInsets.only(left: 8.0),
-                  child: Text(
-                    'Required',
-                    style: GoogleFonts.poppins(
-                      fontSize: 12,
-                      color: Colors.red,
+            _buildMediaButton(
+              icon: Icons.camera_alt,
+              label: 'Take Photo',
+              onPressed: () => _pickMedia(ImageSource.camera),
+            ),
+            _buildMediaButton(
+              icon: Icons.photo_library,
+              label: 'Gallery',
+              onPressed: () => _pickMedia(ImageSource.gallery),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        if (_webMediaBytes != null && _mediaType == 'image')
+          ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+            child: Image.memory(
+              _webMediaBytes!,
+              height: 200,
+              width: double.infinity,
+              fit: BoxFit.cover,
+        ),
+          )
+        else if (_mediaFile != null && _mediaType == 'image')
+          ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+            child: Image.file(
+              _mediaFile!,
+              height: 200,
+              width: double.infinity,
+              fit: BoxFit.cover,
+            ),
+          )
+        else if (_mediaType == 'video')
+          Container(
+            height: 200,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.black87,
+          borderRadius: BorderRadius.circular(12),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                if (!kIsWeb && _mediaFile != null)
+                  VideoThumbnail(videoFile: _mediaFile!)
+                else
+                  const Icon(
+                    Icons.play_circle_outline,
+                    color: Colors.white,
+                    size: 64,
+                  ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+          borderRadius: BorderRadius.circular(12),
+        ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(
+                          Icons.videocam,
+                          color: Colors.white,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Video',
+                          style: GoogleFonts.poppins(
+                            color: Colors.white,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
+                        ),
+                      ],
+                    ),
+                  ),
+        if (_isProcessingMedia)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.purple[400]!),
+                  ),
                 ),
-              if (_mediaType == 'video')
-                Padding(
-                  padding: const EdgeInsets.only(left: 8.0),
-                  child: Text(
-                    '(Video)',
+                const SizedBox(width: 8),
+              Text(
+                  _mediaType == 'video' ? 'Processing video...' : 'Processing image...',
                     style: GoogleFonts.poppins(
                       fontSize: 12,
-                      color: Colors.purple,
-                    ),
+                    color: Colors.purple[400],
                   ),
                 ),
             ],
           ),
-          const SizedBox(height: 8),
-          _buildMediaButtons(),
-          if (_mediaType != null && !_isProcessingMedia) 
-            Container(
-              margin: const EdgeInsets.symmetric(vertical: 10),
+          ),
+        if (_isUploading && _uploadProgress > 0)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            _mediaType == 'video' ? Icons.videocam : Icons.image,
-                            size: 16,
-                            color: Colors.green[700],
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            _mediaType == 'video' ? 'Video Preview' : 'Image Preview',
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.green[700],
-                            ),
-                          ),
-                        ],
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: _cleanupMedia,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        iconSize: 20,
-                        color: Colors.grey[600],
-                      ),
-                    ],
-                  ),
-                  if (_mimeType != null)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(
-                        'Type: $_mimeType',
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                    ),
-                  if (_mediaType == 'video')
-                    Container(
-                      height: 200,
-                      width: double.infinity,
-                      decoration: BoxDecoration(
-                        color: Colors.black87,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          if (!kIsWeb && _mediaFile != null)
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: VideoThumbnail(
-                                videoFile: _mediaFile!,
-                                fit: BoxFit.cover,
-                              ),
-                            )
-                          else if (kIsWeb && _webMediaBytes != null)
-                            Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                color: Colors.black54,
-                              ),
-                              child: const Center(
-                                child: Icon(
-                                  Icons.play_circle_outline,
-                                  size: 64,
-                                  color: Colors.white70,
-                                ),
-                              ),
-                            ),
-                          Positioned(
-                            bottom: 12,
-                            left: 12,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              child: Row(
-                                children: [
-                                  const Icon(
-                                    Icons.videocam,
-                                    size: 16,
-                                    color: Colors.white70,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Video ready for upload',
-                                    style: GoogleFonts.poppins(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  else if (_mediaType == 'image')
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: kIsWeb && _webMediaBytes != null
-                        ? Image.memory(
-                            _webMediaBytes!,
-                            height: 200,
-                            width: double.infinity,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) => Container(
-                              height: 200,
-                              width: double.infinity,
-                              color: Colors.grey[200],
-                              child: Icon(
-                                Icons.broken_image,
-                                color: Colors.grey[400],
-                                size: 32,
-                              ),
-                            ),
-                          )
-                        : !kIsWeb && _mediaFile != null
-                          ? Image.file(
-                              _mediaFile!,
-                              height: 200,
-                              width: double.infinity,
-                              fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
-                                height: 200,
-                                width: double.infinity,
-                                color: Colors.grey[200],
-                                child: Icon(
-                                  Icons.broken_image,
-                                  color: Colors.grey[400],
-                                  size: 32,
-                                ),
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
+                LinearPercentIndicator(
+                  lineHeight: 6,
+                  percent: _uploadProgress,
+                  backgroundColor: Colors.grey[200],
+                  progressColor: Colors.purple[400],
+                  barRadius: const Radius.circular(3),
+                  padding: EdgeInsets.zero,
+                  animation: true,
+                  animateFromLastPercent: true,
+                ),
+                const SizedBox(height: 4),
                       Text(
-                        _mediaType == 'video' ? 'Video ready to upload' : 'Image ready to upload',
-                        style: GoogleFonts.poppins(
-                          color: Colors.green[700],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      TextButton.icon(
-                        icon: const Icon(Icons.delete, color: Colors.red),
-                        label: Text(
-                          'Remove',
-                          style: GoogleFonts.poppins(color: Colors.red),
-                        ),
-                        onPressed: _cleanupMedia,
+                  'Uploading: ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: Colors.purple[400],
+                  ),
                       ),
                     ],
                   ),
-                ],
-              ),
-            ),
-          if (_isProcessingMedia)
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.all(16.0),
-                child: CircularProgressIndicator(),
-              ),
-            ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 
@@ -1292,28 +832,221 @@ class _CreateBugScreenState extends State<CreateBugScreen> {
                         const SizedBox(height: 16),
                         _buildMediaSection(),
                         const SizedBox(height: 24),
-                        ElevatedButton(
-                          onPressed: (_isLoading || _isProcessingMedia) ? null : _submitBugReport,
+                        _buildCompressionIndicator(),
+                        _buildUploadProgress(),
+                        const SizedBox(height: 24),
+                        _buildSubmitButton(),
+                ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+    );
+  }
+
+  Widget _buildProjectDropdown() {
+    // Implementation of _buildProjectDropdown method
+    // This method should return a widget that allows the user to select a project
+    // and update the _selectedProjectId state variable
+    return DropdownButtonFormField<String>(
+      decoration: InputDecoration(
+        labelText: 'Project *',
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.purple[300]!),
+        ),
+        filled: true,
+        fillColor: Colors.grey[50],
+      ),
+      value: _selectedProjectId,
+      items: _projects.map((project) {
+        return DropdownMenuItem<String>(
+          value: project.id.toString(),
+          child: Text(project.name),
+        );
+      }).toList(),
+      onChanged: (value) {
+        if (value != null) {
+          setState(() => _selectedProjectId = value);
+        }
+      },
+    );
+  }
+
+  Widget _buildRecipientDropdown() {
+    // Implementation of _buildRecipientDropdown method
+    // This method should return a widget that allows the user to select a recipient
+    // and update the _selectedRecipientId state variable
+    return DropdownButtonFormField<String>(
+      decoration: InputDecoration(
+        labelText: 'Recipient *',
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.purple[300]!),
+        ),
+        filled: true,
+        fillColor: Colors.grey[50],
+      ),
+      value: _selectedRecipientId,
+      items: _availableUsers.map((user) {
+        return DropdownMenuItem<String>(
+          value: user.id.toString(),
+          child: Text(user.name),
+        );
+      }).toList(),
+      onChanged: (value) {
+        if (value != null) {
+          setState(() => _selectedRecipientId = value);
+        }
+      },
+    );
+  }
+
+  Widget _buildCompressionIndicator() {
+    if (!_isCompressing) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Column(
+        children: [
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.purple),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Compressing video...',
+            style: GoogleFonts.poppins(
+              color: Colors.purple,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUploadProgress() {
+    if (!_isUploading || _uploadProgress == 0) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      child: Column(
+        children: [
+          LinearPercentIndicator(
+            lineHeight: 8.0,
+            percent: _uploadProgress,
+            backgroundColor: Colors.grey[300],
+            progressColor: Colors.purple,
+            barRadius: const Radius.circular(4),
+            animation: true,
+            animateFromLastPercent: true,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Uploading: ${(_uploadProgress * 100).toStringAsFixed(1)}%',
+            style: GoogleFonts.poppins(
+              color: Colors.purple,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSubmitButton() {
+    return ElevatedButton(
+      onPressed: _isLoading ? null : _submitBugReport,
                       style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.purple,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
+        minimumSize: const Size(double.infinity, 48),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                          ),
-                          child: Text(
-                            _isLoading ? 'Creating Bug Report...' : 'Submit Bug Report',
+          borderRadius: BorderRadius.circular(8),
+        ),
+      ),
+      child: _isLoading
+          ? Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_isUploading && _uploadProgress > 0)
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox(
+                          width: 160,
+                          child: LinearPercentIndicator(
+                            lineHeight: 8,
+                            percent: _uploadProgress,
+                            backgroundColor: Colors.white24,
+                            progressColor: Colors.white,
+                            barRadius: const Radius.circular(4),
+                            padding: EdgeInsets.zero,
+                            animation: true,
+                            animateFromLastPercent: true,
+                            center: Text(
+                              '${(_uploadProgress * 100).toInt()}%',
                               style: GoogleFonts.poppins(
-                              fontSize: 16,
+                                color: Colors.white,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w500,
+                              ),
                             ),
                     ),
                   ),
                 ],
                     ),
+                  )
+                else
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Submitting...',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+              ],
+            )
+          : Text(
+              'Submit Bug Report',
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
               ),
             ),
     );

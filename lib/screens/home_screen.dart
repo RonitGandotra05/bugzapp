@@ -30,6 +30,8 @@ import '../widgets/notification_bell.dart';
 import '../services/notification_service.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
+import 'package:video_compress/video_compress.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 enum BugFilter {
   all,
@@ -200,6 +202,13 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   String? _lastImagePath;
   bool _isProcessingImage = false;
 
+  // Add the missing variable
+  double _uploadProgress = 0.0;
+
+  // Add timestamp tracking for WebSocket messages
+  final Map<String, DateTime> _lastProcessedMessages = {};
+  static const _messageDebounceTime = Duration(seconds: 2);
+
   @override
   void initState() {
     super.initState();
@@ -269,22 +278,54 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   void _setupRealTimeUpdates() {
-    // Listen for bug report updates
+    // Listen for bug report updates with debouncing
     _bugReportService.bugReportStream.listen(
       (bugReport) {
-        // Refresh everything when a bug report is received
-        _refreshEverything();
+        final messageKey = 'bug_${bugReport.id}_${bugReport.modifiedDate.millisecondsSinceEpoch}';
+        final lastProcessed = _lastProcessedMessages[messageKey];
+        final now = DateTime.now();
+
+        // Check if this message was processed recently
+        if (lastProcessed == null || 
+            now.difference(lastProcessed) > _messageDebounceTime) {
+          _lastProcessedMessages[messageKey] = now;
+          
+          // Clean up old messages
+          _lastProcessedMessages.removeWhere((_, timestamp) => 
+            now.difference(timestamp) > const Duration(minutes: 1));
+            
+          // Refresh everything when a new bug report is received
+          _refreshEverything();
+        } else {
+          print('[WebSocket] Skipping duplicate bug report update');
+        }
       },
       onError: (error) {
         print('Error in bug report stream: $error');
       },
     );
 
-    // Listen for comment updates
+    // Listen for comment updates with debouncing
     _bugReportService.commentStream.listen(
       (comment) {
-        // Refresh everything when a comment is received
-        _refreshEverything();
+        final messageKey = 'comment_${comment.id}_${comment.createdAt.millisecondsSinceEpoch}';
+        final lastProcessed = _lastProcessedMessages[messageKey];
+        final now = DateTime.now();
+
+        // Check if this message was processed recently
+        if (lastProcessed == null || 
+            now.difference(lastProcessed) > _messageDebounceTime) {
+          _lastProcessedMessages[messageKey] = now;
+          
+          // Clean up old messages
+          _lastProcessedMessages.removeWhere((_, timestamp) => 
+            now.difference(timestamp) > const Duration(minutes: 1));
+            
+          // Refresh everything when a new comment is received
+          _refreshEverything();
+        } else {
+          print('[WebSocket] Skipping duplicate comment update');
+        }
       },
       onError: (error) {
         print('Error in comment stream: $error');
@@ -455,6 +496,182 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      
+      // Show dialog to choose between image and video
+      final mediaType = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Select Media Type', style: GoogleFonts.poppins()),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.image, color: Colors.blue),
+                title: Text('Image', style: GoogleFonts.poppins()),
+                onTap: () => Navigator.pop(context, 'image'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.video_camera_back, color: Colors.red),
+                title: Text('Video', style: GoogleFonts.poppins()),
+                onTap: () => Navigator.pop(context, 'video'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (mediaType == null) return;
+
+      XFile? mediaFile;
+      if (mediaType == 'video') {
+        mediaFile = await picker.pickVideo(
+          source: source,
+          maxDuration: const Duration(minutes: 5), // 5 minutes max
+        );
+        
+        if (mediaFile != null && !kIsWeb) {
+          // Show compression progress dialog
+          if (mounted) {
+            showDialog(
+              context: context,
+              barrierDismissible: false,
+              builder: (context) => AlertDialog(
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const CircularProgressIndicator(),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Compressing video...',
+                      style: GoogleFonts.poppins(),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          try {
+            // Get temp directory for compressed video
+            final tempDir = await getTemporaryDirectory();
+            final tempPath = '${tempDir.path}/compressed_${DateTime.now().millisecondsSinceEpoch}.mp4';
+            
+            // Compress video using video_compress package
+            final info = await VideoCompress.compressVideo(
+              mediaFile.path,
+              quality: VideoQuality.MediumQuality, // Adjust quality as needed
+              deleteOrigin: false,
+              includeAudio: true,
+              frameRate: 30,
+            );
+
+            if (mounted) {
+              Navigator.pop(context); // Close compression dialog
+            }
+
+            if (info?.file != null) {
+              mediaFile = XFile(info!.file!.path);
+            }
+          } catch (e) {
+            print('Error compressing video: $e');
+            if (mounted) {
+              Navigator.pop(context); // Close compression dialog
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error compressing video: $e')),
+              );
+            }
+            return;
+          }
+        }
+      } else {
+        mediaFile = await picker.pickImage(
+          source: source,
+          imageQuality: 70, // Reduced quality for faster upload
+          maxWidth: 1280, // Reduced max dimensions
+          maxHeight: 1280,
+          preferredCameraDevice: CameraDevice.rear,
+        );
+      }
+      
+      if (mediaFile != null && mounted) {
+        try {
+          if (kIsWeb) {
+            final bytes = await mediaFile.readAsBytes();
+            if (mounted) {
+              setState(() {
+                _webImageBytes = bytes;
+                _cachedWebImageBytes = bytes;
+                _imageFile = null;
+                _selectedFile = null;
+                _cachedImageFile = null;
+                _mediaType = mediaType;
+              });
+            }
+          } else {
+            var file = File(mediaFile.path);  // Change to 'var' to make it mutable
+            
+            // For images, compress them further if needed
+            if (mediaType == 'image') {
+              final bytes = await file.readAsBytes();
+              if (bytes.length > 1024 * 1024) { // If larger than 1MB
+                final result = await FlutterImageCompress.compressWithFile(
+                  file.absolute.path,
+                  minWidth: 1280,
+                  minHeight: 1280,
+                  quality: 70,
+                );
+                
+                if (result != null) {
+                  // Save compressed image
+                  final tempDir = await getTemporaryDirectory();
+                  final tempFile = File(
+                    '${tempDir.path}/compressed_${DateTime.now().millisecondsSinceEpoch}.jpg'
+                  );
+                  await tempFile.writeAsBytes(result);
+                  file = tempFile;  // Now this assignment will work
+                }
+              }
+            }
+            
+            if (mounted) {
+              setState(() {
+                _imageFile = file;
+                _selectedFile = file;
+                _cachedImageFile = file;
+                _webImageBytes = null;
+                _cachedWebImageBytes = null;
+                _mediaType = mediaType;
+              });
+            }
+          }
+        } catch (e) {
+          print('Error processing selected media: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Error processing selected media: $e'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print('Error picking media: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error selecting media: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _uploadBugReport() async {
     if (_description == null || _description!.isEmpty) {
       setState(() => _error = 'Description is required');
@@ -468,7 +685,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     if (_imageFile == null && _webImageBytes == null && 
         _cachedImageFile == null && _cachedWebImageBytes == null) {
-      setState(() => _error = 'Please select or capture an image');
+      setState(() => _error = 'Please select or capture an image/video');
       return;
     }
 
@@ -491,6 +708,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         projectId: _selectedProjectId,
         tabUrl: _tabUrl ?? '',
         ccRecipients: _selectedCCRecipients.where((r) => r.isNotEmpty).toList(),
+        mediaType: _mediaType, // Pass the media type to the service
       );
 
       if (mounted) {
@@ -590,102 +808,6 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error capturing photo: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _pickImage(ImageSource source) async {
-    try {
-      final ImagePicker picker = ImagePicker();
-      
-      // Show dialog to choose between image and video
-      final mediaType = await showDialog<String>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Select Media Type', style: GoogleFonts.poppins()),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.image, color: Colors.blue),
-                title: Text('Image', style: GoogleFonts.poppins()),
-                onTap: () => Navigator.pop(context, 'image'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.video_camera_back, color: Colors.red),
-                title: Text('Video', style: GoogleFonts.poppins()),
-                onTap: () => Navigator.pop(context, 'video'),
-              ),
-            ],
-          ),
-        ),
-      );
-
-      if (mediaType == null) return;
-
-      XFile? mediaFile;
-      if (mediaType == 'video') {
-        mediaFile = await picker.pickVideo(
-          source: source,
-          maxDuration: const Duration(minutes: 5), // 5 minutes max
-        );
-      } else {
-        mediaFile = await picker.pickImage(
-          source: source,
-          imageQuality: 85,
-          maxWidth: 1920,
-          maxHeight: 1080,
-        );
-      }
-      
-      if (mediaFile != null && mounted) {
-        try {
-          if (kIsWeb) {
-            final bytes = await mediaFile.readAsBytes();
-            if (mounted) {
-              setState(() {
-                _webImageBytes = bytes;
-                _cachedWebImageBytes = bytes;
-                _imageFile = null;
-                _selectedFile = null;
-                _cachedImageFile = null;
-                _mediaType = mediaType;
-              });
-            }
-          } else {
-            final file = File(mediaFile.path);
-            if (mounted) {
-              setState(() {
-                _imageFile = file;
-                _selectedFile = file;
-                _cachedImageFile = file;
-                _webImageBytes = null;
-                _cachedWebImageBytes = null;
-                _mediaType = mediaType;
-              });
-            }
-          }
-        } catch (e) {
-          print('Error processing selected media: $e');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Error processing selected media: $e'),
-                backgroundColor: Colors.red,
-              ),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      print('Error picking media: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error selecting media: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1119,21 +1241,77 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
 
     if (shouldDelete == true) {
+      // Show a loading dialog
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => AlertDialog(
+          content: Row(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(width: 20),
+              Text('Deleting ${_selectedBugIds.length} bug reports...'),
+            ],
+          ),
+        ),
+      );
+
       try {
-        for (final bugId in _selectedBugIds) {
-          await _bugReportService.deleteBugReport(bugId);
+        // Process deletions in batches of 5
+        final batchSize = 5;
+        final totalBatches = (_selectedBugIds.length / batchSize).ceil();
+        var successCount = 0;
+        var failureCount = 0;
+
+        for (var i = 0; i < totalBatches; i++) {
+          final start = i * batchSize;
+          final end = (start + batchSize < _selectedBugIds.length) 
+              ? start + batchSize 
+              : _selectedBugIds.length;
+          final batch = _selectedBugIds.toList().sublist(start, end);
+
+          await Future.wait(
+            batch.map((bugId) => _bugReportService.deleteBugReport(bugId).then((_) {
+              successCount++;
+            }).catchError((e) {
+              failureCount++;
+              print('Error deleting bug #$bugId: $e');
+            })),
+          );
         }
+
+        // Close the loading dialog
+        if (mounted) {
+          Navigator.pop(context);
+        }
+
         _clearSelection();
         _loadData();
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Bug reports deleted successfully')),
+            SnackBar(
+              content: Text(
+                failureCount > 0
+                    ? 'Deleted $successCount bug reports, failed to delete $failureCount'
+                    : 'Successfully deleted $successCount bug reports'
+              ),
+              backgroundColor: failureCount > 0 ? Colors.orange : Colors.green,
+            ),
           );
         }
       } catch (e) {
+        // Close the loading dialog
+        if (mounted) {
+          Navigator.pop(context);
+        }
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error deleting bug reports: $e')),
+            SnackBar(
+              content: Text('Error deleting bug reports: $e'),
+              backgroundColor: Colors.red,
+            ),
           );
         }
       }
@@ -1192,6 +1370,8 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final selectedBugs = _bugReports.where((bug) => _selectedBugIds.contains(bug.id)).toList();
     final allResolved = selectedBugs.every((bug) => bug.status == BugStatus.resolved);
     final allPending = selectedBugs.every((bug) => bug.status == BugStatus.assigned);
+    final filteredBugs = _sortedAndFilteredBugReports;
+    final allSelected = _selectedBugIds.length == filteredBugs.length;
 
     return AppBar(
       backgroundColor: Colors.white,
@@ -1206,6 +1386,14 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         style: TextStyle(color: Colors.black87),
       ),
       actions: [
+        IconButton(
+          icon: Icon(
+            allSelected ? Icons.deselect : Icons.select_all,
+            color: Colors.blue,
+          ),
+          onPressed: () => _handleSelectAll(allSelected),
+          tooltip: allSelected ? 'Deselect All' : 'Select All',
+        ),
         if (allResolved || allPending)
           IconButton(
             icon: Icon(
@@ -2095,7 +2283,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 ],
                               ),
                             ),
-                            // Image Preview Section - Updated condition
+                            // Image/Video Preview Section - Updated condition
                             if (_imageFile != null || _webImageBytes != null || _cachedImageFile != null || _cachedWebImageBytes != null) ...[
                               const SizedBox(height: 16),
                               Container(
@@ -2109,7 +2297,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    // Image Preview Header
+                                    // Preview Header
                                     Row(
                                       children: [
                                         Icon(
@@ -2120,7 +2308,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         const SizedBox(width: 8),
                                         Expanded(
                                           child: Text(
-                                            'Image Preview',
+                                            _mediaType == 'video' ? 'Video Preview' : 'Image Preview',
                                             style: GoogleFonts.poppins(
                                               color: Colors.grey[700],
                                               fontSize: 14,
@@ -2140,6 +2328,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                               _cachedImageFile = null;
                                               _cachedWebImageBytes = null;
                                               _selectedFile = null;
+                                              _mediaType = null;
                                             });
                                           },
                                           padding: EdgeInsets.zero,
@@ -2149,17 +2338,67 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                       ],
                                     ),
                                     const SizedBox(height: 12),
-                                    // Image Preview Container
+                                    // Media Preview Container
                                     Container(
                                       height: 200,
                                       width: double.infinity,
                                       decoration: BoxDecoration(
+                                        color: Colors.black,
                                         borderRadius: BorderRadius.circular(12),
                                         border: Border.all(color: Colors.grey[300]!),
                                       ),
                                       child: ClipRRect(
                                         borderRadius: BorderRadius.circular(12),
-                                        child: kIsWeb
+                                        child: _mediaType == 'video'
+                                            ? Stack(
+                                                alignment: Alignment.center,
+                                                children: [
+                                                  // Video Thumbnail or Placeholder
+                                                  Container(
+                                                    color: Colors.black,
+                                                    child: const Center(
+                                                      child: Icon(
+                                                        Icons.play_circle_outline,
+                                                        color: Colors.white,
+                                                        size: 64,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  // Video Info
+                                                  Positioned(
+                                                    bottom: 8,
+                                                    left: 8,
+                                                    child: Container(
+                                                      padding: const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 4,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.black.withOpacity(0.7),
+                                                        borderRadius: BorderRadius.circular(4),
+                                                      ),
+                                                      child: Row(
+                                                        children: [
+                                                          const Icon(
+                                                            Icons.videocam,
+                                                            color: Colors.white,
+                                                            size: 16,
+                                                          ),
+                                                          const SizedBox(width: 4),
+                                                          Text(
+                                                            'Video Selected',
+                                                            style: GoogleFonts.poppins(
+                                                              color: Colors.white,
+                                                              fontSize: 12,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                              )
+                                            : kIsWeb
                                           ? (_webImageBytes ?? _cachedWebImageBytes) != null
                                               ? Image.memory(
                                                   _webImageBytes ?? _cachedWebImageBytes!,
@@ -2188,7 +2427,107 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       SizedBox(
                         width: double.infinity,
                         height: 50,
-                        child: ElevatedButton(
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // Base button with gradient background
+                            Container(
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.purple[300]!,
+                                    Colors.purple[400]!,
+                                  ],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.purple.withOpacity(0.3),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // Progress overlay
+                            if (_isSubmitting)
+                              Positioned.fill(
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: [
+                                        Colors.purple[500]!,
+                                        Colors.purple[600]!,
+                                      ],
+                                    ),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: FractionallySizedBox(
+                                        widthFactor: _uploadProgress,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            gradient: LinearGradient(
+                                              colors: [
+                                                Colors.purple[700]!.withOpacity(0.5),
+                                                Colors.purple[800]!.withOpacity(0.7),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            // Button content
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 300),
+                              child: _isSubmitting
+                                  ? Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        SizedBox(
+                                          width: 20,
+                                          height: 20,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2.5,
+                                            valueColor: AlwaysStoppedAnimation<Color>(
+                                              Colors.white.withOpacity(0.9),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              _uploadProgress >= 1.0 ? 'Waiting for server response' : 'Uploading',
+                                              style: GoogleFonts.poppins(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w500,
+                                                fontSize: 16,
+                                              ),
+                                            ),
+                                            if (_uploadProgress < 1.0) ...[
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                '${(_uploadProgress * 100).toInt()}%',
+                                                style: GoogleFonts.poppins(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                  fontSize: 16,
+                                                ),
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ],
+                                    )
+                                  : TextButton(
                           onPressed: _isSubmitting
                               ? null
                               : () async {
@@ -2211,7 +2550,7 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     if (_imageFile == null && _webImageBytes == null && 
                                         _cachedImageFile == null && _cachedWebImageBytes == null) {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Please select or capture an image')),
+                                                    const SnackBar(content: Text('Please select or capture an image/video')),
                                       );
                                       return;
                                     }
@@ -2227,12 +2566,22 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                         projectId: _selectedProjectId,
                                         tabUrl: _tabUrl ?? '',
                                         ccRecipients: _selectedCCRecipients.where((r) => r.isNotEmpty).toList(),
+                                                    mediaType: _mediaType,
+                                                    onProgress: (progress) {
+                                                      // Update progress state
+                                                      setState(() {
+                                                        _uploadProgress = progress;
+                                                      });
+                                                    },
                                       );
                                       
                                       if (mounted) {
                                         Navigator.pop(context);
                                         ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Bug report created successfully')),
+                                          const SnackBar(
+                                            content: Text('Bug report created successfully'),
+                                            backgroundColor: Colors.green,
+                                          ),
                                         );
                                         _loadData();
                                       }
@@ -2249,25 +2598,18 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                                     }
                                   }
                                 },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple[400],
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            elevation: 2,
-                          ),
-                          child: _isSubmitting
-                              ? const CircularProgressIndicator(
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                )
-                              : Text(
-                                  'Submit',
-                                  style: GoogleFonts.poppins(
-                                    color: Colors.white,
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        textStyle: GoogleFonts.poppins(
                                     fontWeight: FontWeight.w500,
                                     fontSize: 16,
                                   ),
+                                        minimumSize: const Size(double.infinity, 50),
                                 ),
+                                      child: const Text('Submit'),
+                                    ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -2320,6 +2662,16 @@ class HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (e) {
       print('Error preloading comments: $e');
     }
+  }
+
+  void _handleSelectAll(bool allSelected) {
+    setState(() {
+      if (allSelected) {
+        _selectedBugIds.clear();
+      } else {
+        _selectedBugIds.addAll(_sortedAndFilteredBugReports.map((bug) => bug.id));
+      }
+    });
   }
 }
 

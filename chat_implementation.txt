@@ -1,0 +1,263 @@
+# Chat System Implementation Documentation
+
+## 1. Database Changes (models.py)
+
+### New Models Required:
+
+```python
+class ChatRoom(Base):
+    __tablename__ = 'chat_rooms'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    
+    # Participants
+    user1_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    user2_id = Column(Integer, ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    
+    # Relationships
+    user1 = relationship("User", foreign_keys=[user1_id])
+    user2 = relationship("User", foreign_keys=[user2_id])
+    messages = relationship("ChatMessage", back_populates="chat_room", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        # Ensure unique pairs of users
+        UniqueConstraint('user1_id', 'user2_id', name='unique_chat_room'),
+    )
+
+class ChatMessage(Base):
+    __tablename__ = 'chat_messages'
+    
+    id = Column(Integer, primary_key=True, index=True)
+    chat_room_id = Column(Integer, ForeignKey('chat_rooms.id', ondelete='CASCADE'), nullable=False)
+    sender_id = Column(Integer, ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    is_read = Column(Boolean, default=False)
+    
+    # Relationships
+    chat_room = relationship("ChatRoom", back_populates="messages")
+    sender = relationship("User")
+```
+
+### Update User Model:
+```python
+class User(Base):
+    # ... existing fields ...
+    
+    # Add these relationships
+    chat_rooms_as_user1 = relationship("ChatRoom", foreign_keys="[ChatRoom.user1_id]", back_populates="user1")
+    chat_rooms_as_user2 = relationship("ChatRoom", foreign_keys="[ChatRoom.user2_id]", back_populates="user2")
+```
+
+## 2. API Routes (chat_routes.py)
+
+Create a new file `routes/chat_routes.py` with these endpoints:
+
+```python
+@router.post("/chat/rooms")
+async def create_chat_room(
+    other_user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(RoleChecker(['user', 'admin']))
+):
+    """Create a new chat room or return existing one"""
+
+@router.get("/chat/rooms")
+async def list_chat_rooms(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(RoleChecker(['user', 'admin']))
+):
+    """List all chat rooms for current user"""
+
+@router.get("/chat/rooms/{room_id}/messages")
+async def get_chat_messages(
+    room_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(RoleChecker(['user', 'admin']))
+):
+    """Get messages for a specific chat room"""
+
+@router.post("/chat/rooms/{room_id}/messages")
+async def send_message(
+    room_id: int,
+    content: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(RoleChecker(['user', 'admin']))
+):
+    """Send a new message in a chat room"""
+
+@router.put("/chat/messages/{message_id}/read")
+async def mark_message_as_read(
+    message_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(RoleChecker(['user', 'admin']))
+):
+    """Mark a message as read"""
+```
+
+## 3. WebSocket Changes
+
+### Update WebSocket Manager (websocket_manager.py):
+```python
+class ConnectionManager:
+    # ... existing code ...
+    
+    async def broadcast_chat_message(self, chat_room_id: int, message: dict, exclude_user: int = None):
+        """Broadcast chat message to room participants only"""
+        room = self.db.query(ChatRoom).get(chat_room_id)
+        if room:
+            participants = [room.user1_id, room.user2_id]
+            for user_id in participants:
+                if user_id != exclude_user and user_id in self.active_connections:
+                    await self.send_personal_message(message, user_id)
+```
+
+### Update WebSocket Routes (websocket_routes.py):
+```python
+async def handle_chat_message(websocket: WebSocket, user: User, data: dict):
+    """Handle incoming chat messages"""
+    room_id = data.get("room_id")
+    content = data.get("content")
+    if room_id and content:
+        # Save message to database
+        message = ChatMessage(
+            chat_room_id=room_id,
+            sender_id=user.id,
+            content=content
+        )
+        db.add(message)
+        db.commit()
+        
+        # Broadcast to room participants
+        await manager.broadcast_chat_message(
+            room_id,
+            {
+                "type": "chat_message",
+                "payload": {
+                    "room_id": room_id,
+                    "message": {
+                        "id": message.id,
+                        "content": content,
+                        "sender_id": user.id,
+                        "created_at": message.created_at.isoformat(),
+                        "is_read": False
+                    }
+                }
+            },
+            exclude_user=user.id
+        )
+```
+
+## 4. Schema Updates (schemas.py)
+
+Add new Pydantic models:
+```python
+class ChatMessageCreate(BaseModel):
+    content: str
+
+class ChatMessageResponse(BaseModel):
+    id: int
+    content: str
+    sender_id: int
+    created_at: datetime
+    is_read: bool
+
+    class Config:
+        from_attributes = True
+
+class ChatRoomResponse(BaseModel):
+    id: int
+    user1_id: int
+    user2_id: int
+    created_at: datetime
+    last_message: Optional[ChatMessageResponse] = None
+    unread_count: int
+
+    class Config:
+        from_attributes = True
+```
+
+## 5. Security Considerations
+
+1. Access Control:
+   - Verify user is part of chat room before allowing access
+   - Only allow message sending to rooms user belongs to
+   - Implement message encryption for sensitive data
+
+2. Rate Limiting:
+   - Limit message frequency per user
+   - Limit chat room creation frequency
+   - Implement message size limits
+
+## 6. Database Migrations
+
+Create new migration for chat tables:
+```bash
+alembic revision --autogenerate -m "add_chat_tables"
+alembic upgrade head
+```
+
+## 7. WebSocket Events
+
+New event types:
+```json
+// New message event
+{
+    "type": "chat_message",
+    "payload": {
+        "room_id": 123,
+        "message": {
+            "id": 456,
+            "content": "Hello!",
+            "sender_id": 789,
+            "created_at": "2024-03-14T12:00:00Z",
+            "is_read": false
+        }
+    }
+}
+
+// Message read event
+{
+    "type": "message_read",
+    "payload": {
+        "room_id": 123,
+        "message_id": 456,
+        "reader_id": 789
+    }
+}
+```
+
+## 8. Required Package Updates (requirements.txt)
+
+Add these packages:
+```
+python-jose[cryptography]  # For message encryption
+rate-limiter  # For rate limiting
+```
+
+## Implementation Steps:
+
+1. Create database migrations for new tables
+2. Implement chat room and message models
+3. Create chat routes with proper access control
+4. Update WebSocket manager for chat functionality
+5. Add chat message handling to WebSocket routes
+6. Implement frontend chat UI (separate documentation)
+7. Test chat functionality with multiple users
+8. Add rate limiting and security measures
+9. Implement message read status and notifications
+10. Add message encryption for sensitive data
+
+## Testing Requirements:
+
+1. Test chat room creation
+2. Test message sending/receiving
+3. Test WebSocket connections
+4. Test access control
+5. Test rate limiting
+6. Test message read status
+7. Test chat history loading
+8. Test user blocking/unblocking
+9. Test error handling
+10. Test concurrent chat sessions 

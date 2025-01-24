@@ -12,6 +12,7 @@ class ImagePreview extends StatelessWidget {
   final String? tabUrl;
   final String description;
   final VoidCallback? onClose;
+  final bool isInBugCard;
 
   const ImagePreview({
     Key? key,
@@ -20,6 +21,7 @@ class ImagePreview extends StatelessWidget {
     this.tabUrl,
     this.description = '',
     this.onClose,
+    this.isInBugCard = false,
   }) : super(key: key);
 
   @override
@@ -29,35 +31,36 @@ class ImagePreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                mediaType == 'video' ? Icons.videocam : Icons.image,
-                size: 16,
-                color: Colors.green[700],
-              ),
-              const SizedBox(width: 8),
-              Text(
-                mediaType == 'video' ? 'Video Preview' : 'Image Preview',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
+          if (!isInBugCard) // Only show header in full view
+            Row(
+              children: [
+                Icon(
+                  mediaType == 'video' ? Icons.videocam : Icons.image,
+                  size: 16,
                   color: Colors.green[700],
-                  fontWeight: FontWeight.w500,
                 ),
-              ),
-              const Spacer(),
-              if (onClose != null)
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: onClose,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  iconSize: 20,
-                  color: Colors.grey[600],
+                const SizedBox(width: 8),
+                Text(
+                  mediaType == 'video' ? 'Video Preview' : 'Image Preview',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: Colors.green[700],
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-            ],
-          ),
-          const SizedBox(height: 8),
+                const Spacer(),
+                if (onClose != null)
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: onClose,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    iconSize: 20,
+                    color: Colors.grey[600],
+                  ),
+              ],
+            ),
+          if (!isInBugCard) const SizedBox(height: 8),
           if (mediaType == 'video')
             _buildVideoPreview()
           else if (imageUrl != null)
@@ -87,6 +90,7 @@ class ImagePreview extends StatelessWidget {
 
   Widget _buildVideoPreview() {
     return Container(
+      height: isInBugCard ? 120 : 200,
       width: double.infinity,
       decoration: BoxDecoration(
         color: Colors.black87,
@@ -111,81 +115,44 @@ class ImagePreview extends StatelessWidget {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              // Gradient background
+              // Play button with semi-transparent background
               Container(
+                width: 48,
+                height: 48,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.purple.withOpacity(0.7),
-                      Colors.black87,
-                    ],
-                  ),
+                  color: Colors.white.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 32,
                 ),
               ),
-              // Content Column
-              Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Large play icon
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.play_arrow_rounded,
-                      size: 64,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  // Text
-                  Text(
-                    'Tap to play video',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Opens in browser',
-                    style: GoogleFonts.poppins(
-                      color: Colors.white70,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-              // Video icon in corner
+              // Video indicator badge
               Positioned(
-                top: 16,
-                right: 16,
+                top: 8,
+                right: 8,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.black54,
-                    borderRadius: BorderRadius.circular(16),
+                    color: Colors.black.withOpacity(0.7),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const Icon(
                         Icons.videocam,
-                        size: 16,
-                        color: Colors.white70,
+                        size: 12,
+                        color: Colors.white,
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 4),
                       Text(
                         'Video',
                         style: GoogleFonts.poppins(
-                          color: Colors.white70,
-                          fontSize: 12,
+                          color: Colors.white,
+                          fontSize: 10,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -193,6 +160,31 @@ class ImagePreview extends StatelessWidget {
                   ),
                 ),
               ),
+              // Text for full preview
+              if (!isInBugCard)
+                Positioned(
+                  bottom: 16,
+                  child: Column(
+                    children: [
+                      Text(
+                        'Play Video in Chrome',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Click to open video',
+                        style: GoogleFonts.poppins(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
             ],
           ),
         ),

@@ -454,6 +454,8 @@ class BugReportService {
     String? projectId,
     String? tabUrl,
     List<String> ccRecipients = const [],
+    String? mediaType,
+    Function(double)? onProgress,
   }) async {
     try {
       print('\n[BugReport Service] Starting bug report upload...');
@@ -462,10 +464,27 @@ class BugReportService {
       final token = await TokenStorage.getToken();
       dio.options.headers['Authorization'] = 'Bearer $token';
 
+      // Optimize upload settings for faster uploads
+      dio.options.sendTimeout = const Duration(minutes: 2);
+      dio.options.receiveTimeout = const Duration(minutes: 2);
+      dio.options.connectTimeout = const Duration(seconds: 20);
+      
+      // Enhanced upload optimization
+      dio.options.contentType = Headers.multipartFormDataContentType;
+      dio.options.headers['connection'] = 'keep-alive';
+      dio.options.responseType = ResponseType.json;
+      dio.options.validateStatus = (status) => status! < 500;
+      
+      // Set larger chunk size for faster uploads (4MB chunks)
+      dio.options.headers['transfer-encoding'] = 'chunked';
+      dio.options.headers['content-length'] = null;
+      dio.options.headers['accept-encoding'] = 'gzip, deflate, br';
+      dio.options.headers['cache-control'] = 'no-cache';
+      dio.options.headers['pragma'] = 'no-cache';
+      
+      // Set up form data with optimized chunk size
       final formData = FormData();
       
-      // Determine media type and content type
-      String? mediaType;
       String? contentType;
       String? fileName;
 
@@ -477,38 +496,53 @@ class BugReportService {
           print('Path: ${imageFile.path}');
           print('Extension: $extension');
           print('Detected MIME: $mimeType');
+          print('Media Type: $mediaType');
           
-          // Set media type and content type based on file type
-          if (mimeType?.startsWith('video/') == true || 
+          // Check if it's a video based on mediaType or file extension
+          if (mediaType == 'video' || mimeType?.startsWith('video/') == true || 
               ['.mp4', '.mov', '.3gp'].contains(extension)) {
-            mediaType = 'video';
             contentType = mimeType ?? 'video/mp4';
             fileName = 'video$extension';
             print('[BugReport Service] Identified as video file');
+            
+            formData.files.add(
+              MapEntry(
+                'file',
+                await MultipartFile.fromFile(
+                  imageFile.path,
+                  filename: fileName,
+                  contentType: MediaType.parse(contentType),
+                ),
+              ),
+            );
           } else {
-            mediaType = 'image';
             contentType = mimeType ?? 'image/png';
             fileName = 'image$extension';
             print('[BugReport Service] Identified as image file');
-          }
 
-          // Add the file to form data with proper content type
-          formData.files.add(
-            MapEntry(
-              'file',
-              await MultipartFile.fromFile(
-                imageFile.path,
-                filename: fileName,
-                contentType: MediaType.parse(contentType),
+            formData.files.add(
+              MapEntry(
+                'file',
+                await MultipartFile.fromFile(
+                  imageFile.path,
+                  filename: fileName,
+                  contentType: MediaType.parse(contentType),
+                ),
               ),
-            ),
-          );
+            );
+          }
           print('[BugReport Service] Added file to form data');
         } else if (imageBytes != null) {
           // For web uploads
-          mediaType = 'video'; // Support both image and video for web
-          contentType = 'video/mp4'; // Default to mp4 for videos
-          fileName = 'video.mp4';
+          if (mediaType == 'video') {
+            contentType = 'video/mp4';
+            fileName = 'video.mp4';
+            print('[BugReport Service] Identified as video file (web)');
+          } else {
+            contentType = 'image/png';
+            fileName = 'image.png';
+            print('[BugReport Service] Identified as image file (web)');
+          }
 
           formData.files.add(
             MapEntry(
@@ -524,7 +558,7 @@ class BugReportService {
         }
       }
 
-      // Add all form fields
+      // Add form fields
       formData.fields.addAll([
         MapEntry('description', description),
         MapEntry('recipient_name', recipientName),
@@ -532,7 +566,7 @@ class BugReportService {
         if (projectId != null) MapEntry('project_id', projectId),
         if (tabUrl != null) MapEntry('tab_url', tabUrl),
         if (ccRecipients.isNotEmpty) MapEntry('cc_recipients', ccRecipients.join(',')),
-        if (mediaType != null) MapEntry('media_type', mediaType), // Add media type to form data
+        if (mediaType != null) MapEntry('media_type', mediaType),
       ]);
 
       print('\n[BugReport Service] Form data details:');
@@ -545,7 +579,7 @@ class BugReportService {
       print('Media Type: $mediaType');
       print('Content Type: $contentType');
       print('File Name: $fileName');
-
+      
       final response = await dio.post(
         '${ApiConstants.baseUrl}/upload',
         data: formData,
@@ -553,9 +587,18 @@ class BugReportService {
           headers: {
             'Authorization': 'Bearer $token',
             if (contentType != null) 'Content-Type': contentType,
+            'transfer-encoding': 'chunked',
+            'connection': 'keep-alive',
+            'accept-encoding': 'gzip, deflate, br',
+            'cache-control': 'no-cache',
+            'pragma': 'no-cache',
           },
-          validateStatus: (status) => status! < 500,
         ),
+        onSendProgress: (int sent, int total) {
+          final progress = sent / total;
+          print('[BugReport Service] Upload progress: ${(progress * 100).toStringAsFixed(2)}%');
+          onProgress?.call(progress);
+        },
       );
 
       print('\n[BugReport Service] Upload response:');
@@ -1020,27 +1063,36 @@ class BugReportService {
           mediaType = 'video';
           contentType = mimeType ?? 'video/mp4';
           print('Identified as video file');
+          
+          // For video files, don't try to decode or process the file
+          formData.files.add(
+            MapEntry(
+              'file',
+              await MultipartFile.fromFile(
+                imageFile.path,
+                filename: 'video$extension',
+                contentType: MediaType.parse(contentType),
+              ),
+            ),
+          );
         } else {
           mediaType = 'image';
           contentType = mimeType ?? 'image/png';
           print('Identified as image file');
-        }
 
-        final fileName = '${mediaType}-${DateTime.now().millisecondsSinceEpoch}$extension';
-        print('Generated filename: $fileName');
-        
-        formData.files.add(
-          MapEntry(
-            'file',
-            MultipartFile.fromBytes(
-              bytes,
-              filename: fileName,
-              contentType: MediaType.parse(contentType),
+          // Add file with optimized chunk size (4MB)
+          formData.files.add(
+            MapEntry(
+              'file',
+              await MultipartFile.fromFile(
+                imageFile.path,
+                filename: 'image$extension',
+                contentType: MediaType.parse(contentType),
+              ),
             ),
-          ),
-        );
-        formData.fields.add(MapEntry('media_type', mediaType));
-        print('File added to form data with media type: $mediaType');
+          );
+        }
+        print('[BugReport Service] Added file to form data');
       }
 
       print('\nPreparing to send request to: ${ApiConstants.baseUrl}/bug-reports/upload');
