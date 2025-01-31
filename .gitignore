@@ -158,3 +158,13 @@ logs/
 # OS specific
 .DS_Store
 Thumbs.db
+
+# Config directories
+config/
+web/firebase-messaging-sw.js
+y/
+
+# If there are any specific files within these directories you want to ignore
+config/*
+web/firebase-messaging-sw.js
+y/*
